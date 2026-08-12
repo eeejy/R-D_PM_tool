@@ -5,18 +5,21 @@ import BrandMark from "@/components/BrandMark";
 import OverviewView from "@/components/OverviewView";
 import WorkTreeView from "@/components/WorkTreeView";
 import WbsView from "@/components/WbsView";
+import RfpView from "@/components/RfpView";
 import { todayISO } from "@/lib/date";
 import { makeId, type MyTask } from "@/lib/mytask";
 import { summarize, type WbsStatus } from "@/lib/wbsStatus";
 import type { WbsFile } from "@/lib/parseFile";
+import type { RfpDocument } from "@/lib/rfp";
 import * as store from "@/lib/store";
 
-type ViewId = "overview" | "tree" | "wbs";
+type ViewId = "overview" | "tree" | "wbs" | "rfp";
 
 const NAV: { id: ViewId; label: string; icon: string }[] = [
   { id: "overview", label: "개요", icon: "◱" },
   { id: "tree", label: "업무트리", icon: "☰" },
   { id: "wbs", label: "연구개발 현황", icon: "▤" },
+  { id: "rfp", label: "RFP 검색", icon: "⌕" },
 ];
 
 export default function App() {
@@ -26,6 +29,8 @@ export default function App() {
   const [tasks, setTasks] = useState<MyTask[]>([]);
   const [file, setFile] = useState<WbsFile | null>(null);
   const [fileName, setFileName] = useState("");
+  const [rfp, setRfp] = useState<RfpDocument | null>(null);
+  const [rfpQuery, setRfpQuery] = useState("");
   const [theme, setTheme] = useState<"light" | "dark" | null>(null);
   const [toast, setToast] = useState("");
   const [hydrated, setHydrated] = useState(false);
@@ -40,7 +45,17 @@ export default function App() {
       setDepartment(saved.department ?? "");
       setTasks(saved.tasks);
       setFileName(saved.wbsName ?? "");
+      setRfp(saved.rfp ?? null);
     }
+
+    // 다른 화면·외부 링크에서 넘어올 수 있게 ?view=rfp&q=... 를 받는다.
+    // 업무트리나 WBS에서 "RFP에서 근거 찾기"를 붙일 때 이 통로를 쓴다.
+    const params = new URLSearchParams(window.location.search);
+    const q = params.get("q");
+    const requested = params.get("view");
+    if (q) setRfpQuery(q);
+    if (requested === "rfp" || q) setView("rfp");
+    else if (requested === "tree" || requested === "wbs" || requested === "overview") setView(requested);
     const storedTheme = window.localStorage.getItem("rnd-flow:theme");
     if (storedTheme === "light" || storedTheme === "dark") setTheme(storedTheme);
     setHydrated(true);
@@ -48,8 +63,8 @@ export default function App() {
 
   useEffect(() => {
     if (!hydrated) return;
-    store.save({ projectName, department, tasks, wbsName: fileName, updatedAt: "" });
-  }, [hydrated, projectName, department, tasks, fileName]);
+    store.save({ projectName, department, tasks, wbsName: fileName, rfp, updatedAt: "" });
+  }, [hydrated, projectName, department, tasks, fileName, rfp]);
 
   useEffect(() => {
     if (theme) document.documentElement.setAttribute("data-theme", theme);
@@ -113,6 +128,7 @@ export default function App() {
     setTasks([]);
     setFile(null);
     setFileName("");
+    setRfp(null);
     notify("초기화했습니다");
   };
 
@@ -141,7 +157,7 @@ export default function App() {
 
         <div className="sidebar__foot">
           <input ref={importInput} type="file" hidden accept=".json" onChange={(event) => importBackup(event.target.files?.[0])} />
-          <button className="nav__item" onClick={() => store.exportWorkspace({ projectName, department, tasks, wbsName: fileName, updatedAt: "" })}>
+          <button className="nav__item" onClick={() => store.exportWorkspace({ projectName, department, tasks, wbsName: fileName, rfp, updatedAt: "" })}>
             <span className="nav__icon" aria-hidden>↓</span><span>내보내기</span>
           </button>
           <button className="nav__item" onClick={() => importInput.current?.click()}>
@@ -212,6 +228,14 @@ export default function App() {
         )}
         {view === "wbs" && (
           <WbsView status={status} file={file} fileName={fileName} onLoad={loadWbs} />
+        )}
+        {view === "rfp" && (
+          <RfpView
+            document={rfp}
+            initialQuery={rfpQuery}
+            onLoad={(next) => { setRfp(next); notify(`RFP ${next.pageCount}쪽 읽음`); }}
+            onRemove={() => { setRfp(null); notify("RFP를 삭제했습니다"); }}
+          />
         )}
       </div>
 

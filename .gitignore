@@ -10,3 +10,6 @@ wbs-inbox/
 # 스크래치 렌더
 icon.svg.png
 small.png
+
+# 설치 시 생성 (scripts/copy-pdf-worker.mjs)
+public/pdf.worker.min.mjs

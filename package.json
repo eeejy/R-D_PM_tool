@@ -4,16 +4,19 @@
   "private": true,
   "description": "공공 R&D 사업 담당자를 위한 업무 판독기 — 자료를 넣으면 변경점·다음 액션·근거 있는 보고문을 만들어 냅니다.",
   "scripts": {
-    "dev": "next dev",
-    "build": "next build",
+    "dev": "node scripts/copy-pdf-worker.mjs && next dev",
+    "build": "node scripts/copy-pdf-worker.mjs && next build",
     "start": "next start",
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "node scripts/copy-pdf-worker.mjs"
   },
   "dependencies": {
+    "mammoth": "^1.9.0",
     "next": "15.5.4",
+    "pdfjs-dist": "^4.10.38",
     "react": "19.1.1",
     "react-dom": "19.1.1",
     "xlsx": "0.18.5"

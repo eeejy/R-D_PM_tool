@@ -774,3 +774,60 @@ button { cursor: pointer; background: none; border: 0; padding: 0; }
 .topbar__name { width: 240px; height: 30px; border: 0; background: transparent; font-weight: 600; padding: 0; }
 
 @media (max-width: 1100px) { .buckets { grid-template-columns: minmax(0, 1fr); } }
+
+/* ── RFP 검색 ──────────────────────────────────────────────── */
+.rfp__head { margin-bottom: var(--s4); }
+.rfp__file { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
+.rfp__name { font-size: 15px; font-weight: 650; letter-spacing: -0.02em; }
+.rfp__meta { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+.rfp__file .btn { margin-left: 0; }
+.rfp__file > div:first-child { margin-right: auto; min-width: 0; }
+
+.rfp__search { display: flex; gap: var(--s3); align-items: center; }
+.rfp__input { height: 44px; font-size: 15px; }
+.rfp__nav { display: flex; align-items: center; gap: var(--s1); flex: none; }
+.rfp__nav button {
+  width: 32px; height: 32px; border: 1px solid var(--border); border-radius: var(--r2);
+  background: var(--surface); color: var(--text-2); font-size: 11px;
+}
+.rfp__nav button:hover { background: var(--surface-3); color: var(--text); }
+.rfp__nav span { font-size: 12.5px; color: var(--text-3); font-variant-numeric: tabular-nums; min-width: 56px; text-align: center; }
+
+.rfp__quick { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s3); }
+.rfp__quick button {
+  height: 26px; padding: 0 var(--s3); border-radius: 999px;
+  border: 1px solid var(--border); background: var(--surface);
+  font-size: 12px; color: var(--text-2);
+}
+.rfp__quick button:hover { border-color: var(--accent); color: var(--accent); }
+.rfp__quick button.is-on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+
+.rfp__layout { display: grid; grid-template-columns: minmax(300px, 400px) minmax(0, 1fr); gap: var(--s4); align-items: start; }
+.rfp__results { position: sticky; top: calc(var(--topbar-h) + var(--s4)); }
+.rfp__hits { display: flex; flex-direction: column; max-height: calc(100vh - 320px); overflow-y: auto; }
+.rfp__hit { display: block; width: 100%; text-align: left; padding: var(--s3) var(--s5); border-top: 1px solid var(--border); }
+.rfp__hit:first-child { border-top: 0; }
+.rfp__hit:hover { background: var(--surface-2); }
+.rfp__hit.is-current { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.rfp__hit-page { font-size: 12px; font-weight: 700; color: var(--accent); display: flex; gap: var(--s2); align-items: baseline; }
+.rfp__hit-page em { font-style: normal; font-weight: 500; color: var(--text-4); }
+.rfp__hit-text { font-size: 12.5px; color: var(--text-2); line-height: 1.7; margin-top: 4px; word-break: keep-all; }
+
+.rfp__pager { display: flex; align-items: center; gap: var(--s3); width: 100%; }
+.rfp__pageno { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text-3); }
+.rfp__text {
+  padding: var(--s6) var(--s8);
+  font-size: 14px; line-height: 2;
+  white-space: pre-wrap; word-break: keep-all;
+  max-height: calc(100vh - 260px); overflow-y: auto;
+}
+mark { background: #ffe27a; color: #4a3200; border-radius: 3px; padding: 0 2px; }
+:root[data-theme="dark"] mark,
+.rfp__hit.is-current mark { background: var(--accent); color: var(--on-accent); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) mark { background: var(--accent); color: var(--on-accent); } }
+
+@media (max-width: 1100px) {
+  .rfp__layout { grid-template-columns: minmax(0, 1fr); }
+  .rfp__results { position: static; }
+  .rfp__hits { max-height: 320px; }
+}

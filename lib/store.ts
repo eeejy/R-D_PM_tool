@@ -1,4 +1,5 @@
 import type { MyTask } from "./mytask";
+import type { RfpDocument } from "./rfp";
 
 /**
  * 로컬 저장소.
@@ -16,11 +17,13 @@ export type Workspace = {
   tasks: MyTask[];
   /** 마지막으로 읽은 WBS 파일명 */
   wbsName: string;
+  /** 검색용 RFP 원문. 추출한 텍스트만 담는다(원본 파일은 보관하지 않음) */
+  rfp: RfpDocument | null;
   updatedAt: string;
 };
 
 export function emptyWorkspace(): Workspace {
-  return { projectName: "CDX 연구개발사업", department: "", tasks: [], wbsName: "", updatedAt: "" };
+  return { projectName: "CDX 연구개발사업", department: "", tasks: [], wbsName: "", rfp: null, updatedAt: "" };
 }
 
 export function load(): Workspace | null {
@@ -37,10 +40,17 @@ export function load(): Workspace | null {
 
 export function save(workspace: Workspace): void {
   if (typeof window === "undefined") return;
+  const payload = { ...workspace, updatedAt: new Date().toISOString() };
   try {
-    window.localStorage.setItem(KEY, JSON.stringify({ ...workspace, updatedAt: new Date().toISOString() }));
+    window.localStorage.setItem(KEY, JSON.stringify(payload));
   } catch {
-    // 용량 초과 등 — 저장 실패가 작업을 막지는 않게 둔다
+    // 긴 RFP를 넣으면 localStorage 한도를 넘을 수 있다.
+    // 그때는 업무만이라도 지켜야 하므로 RFP를 빼고 다시 시도한다.
+    try {
+      window.localStorage.setItem(KEY, JSON.stringify({ ...payload, rfp: null }));
+    } catch {
+      // 그래도 안 되면 저장을 포기한다 — 작업 자체를 막지는 않는다
+    }
   }
 }
 
