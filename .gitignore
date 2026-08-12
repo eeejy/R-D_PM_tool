@@ -1,0 +1,12 @@
+node_modules/
+.next/
+out/
+*.tsbuildinfo
+next-env.d.ts
+.DS_Store
+.env*.local
+wbs-inbox/
+
+# 스크래치 렌더
+icon.svg.png
+small.png

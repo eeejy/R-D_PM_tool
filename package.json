@@ -1,0 +1,28 @@
+{
+  "name": "rnd-flow",
+  "version": "0.2.0",
+  "private": true,
+  "description": "공공 R&D 사업 담당자를 위한 업무 판독기 — 자료를 넣으면 변경점·다음 액션·근거 있는 보고문을 만들어 냅니다.",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "15.5.4",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "xlsx": "0.18.5"
+  },
+  "devDependencies": {
+    "@types/node": "24.3.0",
+    "@types/react": "19.1.9",
+    "@types/react-dom": "19.1.7",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}
