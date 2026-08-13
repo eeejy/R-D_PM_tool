@@ -8,10 +8,13 @@ import {
   generateMinutes,
   parseMeetingMeta,
   renderOnePager,
+  requestsToDrafts,
   splitAgenda,
   type MinutesReport,
 } from "@/lib/minutes";
 import { readRfpFile, RfpParseError } from "@/lib/rfpParse";
+import { orgName } from "@/lib/org";
+import { categoryTitle } from "@/lib/worktree";
 import type { MyTask } from "@/lib/mytask";
 import type { LlmCall } from "@/lib/llm";
 
@@ -38,6 +41,8 @@ export default function AiMinutes({
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState("");
   const [focus, setFocus] = useState(0);
+  /** 등록할 요청사항. **기본값은 전체 해제다** — 회의록에서 뽑은 것이 전부 내 업무는 아니다. */
+  const [checked, setChecked] = useState<number[]>([]);
   const fileInput = useRef<HTMLInputElement>(null);
   const abort = useRef<AbortController | null>(null);
 
@@ -83,6 +88,17 @@ export default function AiMinutes({
     if (!report?.actions.length) return;
     onAdd(actionsToDrafts(report.actions, today) as MyTask[]);
   };
+
+  const registerRequests = () => {
+    if (!report || !checked.length) return;
+    const picked = checked.map((index) => report.requests[index]).filter(Boolean);
+    onAdd(requestsToDrafts(picked, today, report.meeting.title) as MyTask[]);
+    setChecked([]);
+  };
+
+  const toggle = (index: number) =>
+    setChecked((current) =>
+      current.includes(index) ? current.filter((item) => item !== index) : [...current, index]);
 
   return (
     <div className="stack">
@@ -167,6 +183,37 @@ export default function AiMinutes({
                   <div key={index} className="line">
                     <p className="line__text">{decision.text}</p>
                     <SourceChip segment={decision.sourceSegment} onClick={setFocus} />
+                  </div>
+                ))}
+              </Section>
+
+              <Section
+                title="요청사항"
+                count={report.requests.length}
+                action={
+                  checked.length > 0 && (
+                    <button className="btn btn--sm btn--primary" onClick={registerRequests}>
+                      {checked.length}건 업무로 등록
+                    </button>
+                  )
+                }
+              >
+                {report.requests.map((request, index) => (
+                  <div key={index} className={`line ${request.confidence === "low" ? "is-low" : ""}`}>
+                    <label className="req">
+                      {/* 확신도가 낮은 항목은 체크를 비워 둔다. 기한이나 기관이 없다는 뜻이다. */}
+                      <input type="checkbox" checked={checked.includes(index)} onChange={() => toggle(index)} />
+                      <span className="line__text">{request.text}</span>
+                    </label>
+                    <p className="line__source">
+                      <span className={`tag ${request.direction === "outgoing" ? "tag--info" : "tag--accent"}`}>
+                        {request.direction === "outgoing" ? "우리가 요청" : "요청받음"}
+                      </span>
+                      {orgName(request.counterpartOrgId)} · {categoryTitle(request.categoryId)}
+                      {" · "}{request.due || "기한 미정"}
+                      {request.confidence === "low" && <span className="tag tag--warn">확인 필요</span>}
+                    </p>
+                    <SourceChip segment={request.sourceSegment} onClick={setFocus} />
                   </div>
                 ))}
               </Section>

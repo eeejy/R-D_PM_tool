@@ -372,6 +372,27 @@ few-shot 예시(`DEFAULT_EMAIL_EXAMPLES`)를 **실제로 보냈던 메일 3통�
 추출된 후속조치는 기존 빠른 입력(`lib/capture.ts`)을 통해 **업무로 바로 등록된다.**
 회의록 → 업무 자동 등록이 이 기능의 진짜 값어치다.
 
+#### 요청사항 — 방향이 있다
+
+후속조치와 다른 점은 **방향**이다. 우리가 요청한 건과 요청받은 건은 이후 판정이 갈린다 —
+나간 건은 회신 대기(재촉 대상)가 되고, 받은 건은 내가 처리할 일(기한 임박 대상)이 된다.
+
+**모델이 정하는 것은 방향과 문장뿐이다.**
+
+| 값 | 누가 정하나 |
+|---|---|
+| `direction` | 모델 (문장의 의미라 규칙으로 못 읽는다) |
+| `text` | 모델 |
+| `counterpartOrgId` | **별칭 매칭** — 모델이 다른 기관을 우겨도 문장에 있는 기관을 쓴다 |
+| `categoryId` | **기존 8개 분류기** — 모델이 새 분류를 만들지 못한다 |
+| `due` | **원문 근거 검사** — 원문에 없는 날짜는 버린다 |
+| `confidence` | **빈 칸 여부** — 기한이나 기관이 비면 `low` |
+
+**일괄 자동 등록을 하지 않는다.** 기본값은 전체 선택 해제다 — 회의록에서 뽑은 것이 전부
+내 업무는 아니다. `confidence: low`는 화면에서 흐리게 표시하고 체크를 비워 둔다.
+
+등록된 업무에는 회의명과 안건 번호가 근거로 남아 **회의록 해당 발언으로 되짚어 갈 수 있다.**
+
 한 안건이 실패해도 나머지는 계속 돌고, **실패한 안건 번호를 보고서에 남긴다** —
 조용히 빠지는 것이 가장 나쁘다.
 
@@ -382,7 +403,7 @@ few-shot 예시(`DEFAULT_EMAIL_EXAMPLES`)를 **실제로 보냈던 메일 3통�
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 316개 테스트
+npm test           # 326개 테스트
 npm run build
 ```
 
@@ -455,7 +476,7 @@ components/    OverviewView · WorkTreeView · WbsView · RfpView · OrgView · 
                QuickAdd · TaskRow · BrandMark · PromptPeek
                AiDailyReport · AiEmail · AiMinutes
 app/           page.tsx (셸 + 상태) · globals.css (디자인 토큰)
-tests/         316개
+tests/         326개
 ```
 
 **원칙 1** — 시간에 의존하는 함수는 전부 `today`를 인자로 받는다(`capture`, `score`, `bucket`, `summarize`, `generateDailyReport`, `generateMinutes`). 그래야 "오늘 기준"이 테스트 가능해진다.
@@ -484,7 +505,7 @@ tests/rfpParse.test.ts     6  형식 판별 · 쪽 나누기 · 빈 문서 처�
 tests/llm.test.ts         24  요청 구성(num_ctx) · JSON 추출 · 오류 분류 · HTTP 왕복
 tests/dailyReport.test.ts 30  보고 대상 선별 · 상부/연구책임자 분류 · 응답 검증
 tests/emailDraft.test.ts  21  템플릿 조립 · 기관·날짜 주입 · 편집 반영
-tests/minutes.test.ts     34  안건 분할 · 회의정보 추출 · 병합 · 1p 보고서
+tests/minutes.test.ts     44  안건 분할 · 회의정보 · 요청사항 추출 · 업무 등록
 ```
 
 **LLM이 생성한 문장 자체는 테스트하지 않는다.** 매번 달라지므로 테스트 대상이 될 수 없다.

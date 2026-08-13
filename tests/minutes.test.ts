@@ -8,6 +8,7 @@ import {
   renderOnePager,
   splitAgenda,
   validateSegmentOutput,
+  requestsToDrafts,
   dateGroundedIn,
   type Action,
 } from "../lib/minutes";
@@ -119,7 +120,7 @@ describe("응답 검증", () => {
   });
 
   it("일부 배열만 와도 받아들인다", () => {
-    expect(validateSegmentOutput({ decisions: [] })).toEqual({ issues: [], decisions: [], actions: [] });
+    expect(validateSegmentOutput({ decisions: [] })).toEqual({ issues: [], decisions: [], actions: [], requests: [] });
   });
 
   it("항목이 문자열로 와도 살린다", () => {
@@ -267,5 +268,89 @@ describe("generateMinutes", () => {
     const report = await generateMinutes(MINUTES, TODAY, null);
     expect(report.segments.length).toBeGreaterThanOrEqual(3);
     expect(report.meeting.title).toBe("제3차 CDX 실무회의");
+  });
+});
+
+describe("요청사항 추출", () => {
+  const source = "A기관이 지엠티에 데이터 3종 제공을 요청함. 지엠티는 8월 20일까지 회신하기로 함.";
+
+  it("방향만 모델이 정한다", () => {
+    const parsed = validateSegmentOutput(
+      { requests: [{ direction: "incoming", text: "데이터 3종 제공", org: "지엠티", due: "2026-08-20" }] },
+      source,
+    );
+    expect(parsed?.requests?.[0].direction).toBe("incoming");
+  });
+
+  it("방향이 없거나 이상하면 outgoing으로 둔다", () => {
+    const parsed = validateSegmentOutput({ requests: [{ text: "자료 제출", direction: "옆으로" }] }, source);
+    expect(parsed?.requests?.[0].direction).toBe("outgoing");
+  });
+
+  it("기관은 모델이 아니라 별칭 매칭이 정한다", () => {
+    const parsed = validateSegmentOutput(
+      { requests: [{ text: "지엠티 데이터 제공", counterpartOrgId: "kimst" }] },
+      source,
+    );
+    // 모델이 KIMST라고 우겨도 문장에 있는 기관을 쓴다
+    expect(parsed?.requests?.[0].counterpartOrgId).toBe("gmt");
+  });
+
+  it("원문에 없는 기관 id는 받지 않는다", () => {
+    const parsed = validateSegmentOutput(
+      { requests: [{ text: "자료 제출", counterpartOrgId: "surromind" }] },
+      "특별한 기관명이 없는 문장입니다.",
+    );
+    expect(parsed?.requests?.[0].counterpartOrgId).toBe("etc");
+  });
+
+  it("분류는 기존 8개 영역이 정한다 — 모델이 새 분류를 만들지 못한다", () => {
+    const parsed = validateSegmentOutput({ requests: [{ text: "데이터 3종 제공 요청", category: "새분류" }] }, source);
+    expect(parsed?.requests?.[0].categoryId).toBe("data");
+  });
+
+  it("원문에 없는 기한은 버린다", () => {
+    const parsed = validateSegmentOutput({ requests: [{ text: "자료 제출", due: "2026-12-31" }] }, source);
+    expect(parsed?.requests?.[0].due).toBe("");
+  });
+
+  it("기한이나 기관이 비면 확신도를 낮춘다", () => {
+    const high = validateSegmentOutput(
+      { requests: [{ text: "지엠티 데이터 제공", due: "2026-08-20" }] }, source);
+    expect(high?.requests?.[0].confidence).toBe("high");
+
+    const low = validateSegmentOutput({ requests: [{ text: "자료 제출" }] }, source);
+    expect(low?.requests?.[0].confidence).toBe("low");
+  });
+});
+
+describe("요청사항 → 업무 등록", () => {
+  const requests = [
+    { direction: "outgoing" as const, counterpartOrgId: "gmt" as const, text: "데이터 3종 제공 요청",
+      due: "2026-08-20", categoryId: "data" as const, sourceSegment: 2, confidence: "high" as const },
+    { direction: "incoming" as const, counterpartOrgId: "kimst" as const, text: "제출자료 검토",
+      due: "", categoryId: "report" as const, sourceSegment: 3, confidence: "low" as const },
+  ];
+
+  it("기관과 분류를 그대로 옮긴다", () => {
+    const [draft] = requestsToDrafts(requests, TODAY);
+    expect(draft.orgId).toBe("gmt");
+    expect(draft.org).toBe("지엠티");
+    expect(draft.categoryId).toBe("data");
+    expect(draft.due).toBe("2026-08-20");
+  });
+
+  it("방향에 따라 상태가 갈린다", () => {
+    // 나간 요청은 회신 대기가 되고, 받은 요청은 내가 처리할 일이 된다
+    const [outgoing, incoming] = requestsToDrafts(requests, TODAY);
+    expect(outgoing.status).toBe("요청 필요");
+    expect(outgoing.awaiting).toBe(true);
+    expect(incoming.status).toBe("확인 필요");
+    expect(incoming.awaiting).toBe(false);
+  });
+
+  it("어느 발언에서 나왔는지 근거를 남긴다", () => {
+    const [draft] = requestsToDrafts(requests, TODAY, "제3차 실무회의");
+    expect(draft.note).toMatch(/제3차 실무회의 회의록 안건 2/);
   });
 });

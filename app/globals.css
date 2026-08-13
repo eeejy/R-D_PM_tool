@@ -965,3 +965,8 @@ mark { background: #ffe27a; color: #4a3200; border-radius: 3px; padding: 0 2px; 
 
 /* 재촉 목록의 행동 버튼 — 초안 / 발송함 / 회신옴 */
 .reminder__acts { display: flex; gap: var(--s1); flex: none; }
+
+/* 회의록에서 뽑은 요청사항 — 기본값은 전체 해제다 */
+.req { display: flex; align-items: baseline; gap: var(--s2); cursor: pointer; }
+.line.is-low { opacity: .8; }
+.line.is-low .line__text { color: var(--text-2); }

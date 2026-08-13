@@ -14,6 +14,8 @@
  */
 
 import { capture, type Draft } from "./capture";
+import { classify } from "./worktree";
+import { isOrgId, matchOrg, ORG_BY_ID, type OrgId } from "./org";
 import { asText, asTextList, isRecord, oneLine, parseResponse, type LlmCall } from "./llm";
 import { parseCellDate } from "./text";
 
@@ -198,11 +200,13 @@ export const MINUTES_SYSTEM = [
   "- 원문에 없는 내용을 만들지 않습니다. 기관명·날짜·수치·발언자는 원문에 적힌 것만 씁니다.",
   "- 원문에 없는 항목은 빈 배열로 둡니다. 억지로 채우지 않습니다.",
   "- 쟁점(issues)은 의견이 갈린 사안이고, 결정(decisions)은 확정된 사항이며, 후속조치(actions)는 누가 언제까지 할 일입니다.",
+  "- 요청사항(requests)은 기관 사이에 오간 요청입니다. 우리가 요청한 것은 direction을 outgoing, 우리가 요청받은 것은 incoming으로 적습니다.",
+  "- 기관 이름은 원문에 적힌 그대로만 씁니다. 짐작해서 바꾸지 않습니다.",
   "- owner와 due는 원문에 있을 때만 채우고, 없으면 빈 문자열로 둡니다.",
   "- JSON만 출력합니다. 설명을 덧붙이지 않습니다.",
 ].join("\n");
 
-const SEGMENT_EXAMPLE = `{"issues":[{"topic":"실증 대상지 선정","positions":["A기관은 상반기 내 확정을 요청","B기관은 데이터 확보 이후 검토가 필요하다는 입장"]}],"decisions":[{"text":"실증 대상지는 다음 월간회의에서 확정하기로 함"}],"actions":[{"text":"후보지 3곳 비교표 작성","owner":"A기관","due":"2026-08-20"}]}`;
+const SEGMENT_EXAMPLE = `{"issues":[{"topic":"실증 대상지 선정","positions":["A기관은 상반기 내 확정을 요청","B기관은 데이터 확보 이후 검토가 필요하다는 입장"]}],"decisions":[{"text":"실증 대상지는 다음 월간회의에서 확정하기로 함"}],"actions":[{"text":"후보지 3곳 비교표 작성","owner":"A기관","due":"2026-08-20"}],"requests":[{"direction":"outgoing","org":"A기관","text":"후보지 3곳 비교표 제출","due":"2026-08-20"}]}`;
 
 export function buildSegmentPrompt(segment: Segment, meta: MeetingMeta): string {
   return [
@@ -213,13 +217,34 @@ export function buildSegmentPrompt(segment: Segment, meta: MeetingMeta): string 
     "[안건 원문]",
     segment.text,
     "",
-    "위 안건에서 쟁점·결정사항·후속조치를 뽑아내세요.",
+    "위 안건에서 쟁점·결정사항·후속조치·요청사항을 뽑아내세요.",
     "[출력 형식 예시]",
     SEGMENT_EXAMPLE,
     "",
     "위 형식의 JSON만 출력하세요.",
   ].join("\n");
 }
+
+/**
+ * 요청사항 — 회의에서 오간 "누가 누구에게 무엇을 언제까지".
+ *
+ * 후속조치(`actions`)와 다른 점은 **방향**이다. 우리가 요청한 건과 우리가 요청받은
+ * 건은 이후 판정이 갈린다 — 나간 건은 회신 대기가 되고, 받은 건은 기한 임박이 된다.
+ */
+export type RequestDirection = "outgoing" | "incoming";
+
+export type MeetingRequest = {
+  direction: RequestDirection;
+  /** 상대 기관. 모델이 아니라 별칭 매칭이 정한다. */
+  counterpartOrgId: OrgId;
+  text: string;
+  due: string;
+  /** 8개 영역 중 하나. 기존 분류기가 정한다 — 모델이 새 분류를 만들지 못한다. */
+  categoryId: ReturnType<typeof classify>["id"];
+  sourceSegment: number;
+  /** 기한이나 기관이 비면 low. 화면에서 체크박스를 비워 둔다. */
+  confidence: "high" | "low";
+};
 
 export type Issue = { topic: string; positions: string[]; sourceSegment: number };
 export type Decision = { text: string; sourceSegment: number };
@@ -229,6 +254,8 @@ export type SegmentResult = {
   issues: Omit<Issue, "sourceSegment">[];
   decisions: Omit<Decision, "sourceSegment">[];
   actions: Omit<Action, "sourceSegment">[];
+  /** 요청사항. 예전 형식으로 만든 결과도 받아들이려고 선택 항목으로 둔다. */
+  requests?: Omit<MeetingRequest, "sourceSegment">[];
 };
 
 /**
@@ -259,7 +286,7 @@ export function dateGroundedIn(iso: string, source: string): boolean {
  */
 export function validateSegmentOutput(value: unknown, source = ""): SegmentResult | null {
   if (!isRecord(value)) return null;
-  const hasAny = ["issues", "decisions", "actions"].some((key) => Array.isArray(value[key]));
+  const hasAny = ["issues", "decisions", "actions", "requests"].some((key) => Array.isArray(value[key]));
   if (!hasAny) return null;
 
   return {
@@ -297,7 +324,53 @@ export function validateSegmentOutput(value: unknown, source = ""): SegmentResul
         };
       })
       .filter((entry): entry is Omit<Action, "sourceSegment"> => entry !== null),
+
+    requests: toArray(value.requests)
+      .map((entry) => toRequest(entry, source))
+      .filter((entry): entry is Omit<MeetingRequest, "sourceSegment"> => entry !== null),
   };
+}
+
+/**
+ * 요청사항 한 건을 다듬는다.
+ *
+ * **모델이 정하는 것은 방향과 문장뿐이다.** 기관은 별칭 매칭이, 분류는 기존 분류기가,
+ * 기한은 원문 근거 검사가 정한다 — 8B 모델은 처음 보는 기관명을 지어내고 새 분류를
+ * 만들어 낸다. 확신도도 모델에게 묻지 않고 빈 칸이 있는지로 판정한다.
+ */
+function toRequest(entry: unknown, source: string): Omit<MeetingRequest, "sourceSegment"> | null {
+  const record = isRecord(entry) ? entry : null;
+  const text = oneLine(record ? record.text ?? record.request : entry);
+  if (!text) return null;
+
+  const direction: RequestDirection = asText(record?.direction) === "incoming" ? "incoming" : "outgoing";
+
+  // 모델이 준 기관 id는 원문에 그 기관 표기가 실제로 있을 때만 받는다.
+  const claimed = asText(record?.counterpartOrgId ?? record?.orgId);
+  const named = oneLine(record?.org ?? record?.counterpart ?? record?.owner);
+  const byRule = matchOrg(`${named} ${text}`).org.id;
+  const grounded =
+    byRule !== "etc" ? byRule
+    : isOrgId(claimed) && aliasInSource(claimed, source) ? claimed
+    : matchOrg(source).org.id;
+
+  const rawDue = parseCellDate(asText(record?.due ?? record?.deadline));
+  const due = !rawDue || !source || dateGroundedIn(rawDue, source) ? rawDue : "";
+
+  return {
+    direction,
+    counterpartOrgId: grounded,
+    text,
+    due,
+    categoryId: classify(text).id,
+    // 기한이나 기관이 비면 사람이 채워야 한다. 기본값으로 등록되지 않게 표시한다.
+    confidence: due && grounded !== "etc" ? "high" : "low",
+  };
+}
+
+function aliasInSource(orgId: OrgId, source: string): boolean {
+  return matchOrg(source).org.id === orgId
+    || (ORG_BY_ID.get(orgId)?.aliases ?? []).some((alias) => source.includes(alias));
 }
 
 function toArray(value: unknown): unknown[] {
@@ -311,6 +384,7 @@ export type MinutesReport = {
   issues: Issue[];
   decisions: Decision[];
   actions: Action[];
+  requests: MeetingRequest[];
   segments: Segment[];
   /** 모델이 실패한 안건 번호. 화면에 그대로 알려 준다 — 조용히 빠지는 게 가장 나쁘다. */
   failedSegments: number[];
@@ -322,7 +396,7 @@ export function mergeMinutes(
   segments: Segment[],
   results: (SegmentResult | null)[],
 ): MinutesReport {
-  const report: MinutesReport = { meeting: meta, issues: [], decisions: [], actions: [], segments, failedSegments: [] };
+  const report: MinutesReport = { meeting: meta, issues: [], decisions: [], actions: [], requests: [], segments, failedSegments: [] };
 
   segments.forEach((segment, order) => {
     const result = results[order];
@@ -333,6 +407,7 @@ export function mergeMinutes(
     for (const issue of result.issues) report.issues.push({ ...issue, sourceSegment: segment.index });
     for (const decision of result.decisions) report.decisions.push({ ...decision, sourceSegment: segment.index });
     for (const action of result.actions) report.actions.push({ ...action, sourceSegment: segment.index });
+    for (const request of result.requests ?? []) report.requests.push({ ...request, sourceSegment: segment.index });
   });
 
   return report;
@@ -418,6 +493,26 @@ export function renderOnePager(report: MinutesReport): string {
  * 회의록에서 업무가 바로 등록되는 것이 이 기능의 진짜 값어치다. 문장 해석은
  * 기존 빠른 입력(`capture`)이 그대로 하고, 회의록이 더 잘 아는 담당기관·기한만 덮어쓴다.
  */
+export function requestsToDrafts(requests: MeetingRequest[], today: string, meetingTitle = ""): Draft[] {
+  return requests.map((request) => {
+    const draft = capture(request.text, today);
+    const org = ORG_BY_ID.get(request.counterpartOrgId)!;
+    return {
+      ...draft,
+      categoryId: request.categoryId,
+      orgId: request.counterpartOrgId,
+      org: request.counterpartOrgId === "etc" ? draft.org : org.name,
+      due: request.due || draft.due,
+      dueNote: request.due ? "" : draft.dueNote,
+      // 우리가 보낸 요청은 회신 대기가 되고, 받은 요청은 내가 처리할 일이 된다.
+      status: request.direction === "outgoing" ? "요청 필요" : "확인 필요",
+      awaiting: request.direction === "outgoing",
+      // 어느 발언에서 나왔는지 되짚을 수 있어야 한다
+      note: `${request.text} (${meetingTitle ? `${meetingTitle} ` : ""}회의록 안건 ${request.sourceSegment})`,
+    };
+  });
+}
+
 export function actionsToDrafts(actions: Action[], today: string): Draft[] {
   return actions.map((action) => {
     const draft = capture(action.text, today);
