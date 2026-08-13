@@ -114,6 +114,36 @@ A기관에 데이터 3종 아직 안 왔음. 금요일까지 다시 확인
 
 시간 분류는 **오늘 → 이번 주 → 이번 달** 순이고, 기한이 지난 일은 '오늘'로 올린다. 이번 주 카드가 화면에서 가장 강조된다.
 
+### 이벤트 로그 — 왜 이렇게까지 밀렸는가 (`lib/history.ts`)
+
+"몇 번 미뤘나"를 숫자 하나로 들고 있으면 **왜 이렇게까지 밀렸는지**를 답할 수 없다.
+담당자가 바뀌는 시점에 가장 크게 유실되는 것이 바로 그 경위다.
+
+그래서 사건을 그대로 쌓는다. `created` · `due_changed` · `status_changed` · `sent` ·
+`replied` · `reminded` · `closed` 일곱 가지다.
+
+**append-only다.** 이벤트는 고치지도 지우지도 않는다. 업무를 지워도 `closed`로 남긴다.
+그리고 화면에 쓰는 값은 **전부 파생값으로 계산한다** — 저장하는 순간 사건과 요약이
+어긋나기 시작한다.
+
+| 파생 지표 | 쓰는 곳 |
+|---|---|
+| `postponeCount` | 우선순위 가점 · "3회 연기" |
+| `totalSlipDays` | "당초 6월 30일 → 현재 9월 30일" |
+| `daysSinceContact` | 회신 대기 영업일 · 재촉 판정 |
+| `awaitingReply` | 미결 요청 목록 |
+| `reminderStage` | 재촉 문체 강도(1차 확인 → 2차 기한 → 3차 경위) |
+
+우선순위에는 **더하기만 한다.** 기존 배점은 건드리지 않았다. 2회 연기 +10, 4회 이상
++10, 누적 30일 이상 +10, 회신 임계일 초과 +15이고 근거 문구가 기존 근거 영역에 그대로 붙는다.
+
+**영업일 계산은 따로 시험한다.** 임계일 판정이 전부 여기 걸려 있는데 주말 처리는 조용히
+틀리기 쉽다. 금요일에 보내고 다음 월요일이면 1영업일이고, 보낸 날 당일은 세지 않는다 —
+아침에 보낸 요청을 그날 오후에 "1일 지났다"고 재촉할 수는 없다.
+
+**공휴일은 아직 넣지 않았다.** 음력 명절처럼 해마다 바뀌는 날짜를 코드에 박아 두면
+이듬해에 조용히 틀린다. 지금은 주말만 세고, 필요하면 호출부가 날짜 목록을 넘긴다.
+
 ## 4. 연구개발 현황 (`lib/wbsStatus.ts`)
 
 회차 간 비교는 하지 않는다. 담당자가 알아야 하는 건 "지난주 대비 뭐가 바뀌었나"가 아니라 **"지금 어떤 상태이고 뭘 확인해야 하나"** 이기 때문이다.
@@ -270,7 +300,7 @@ few-shot 예시(`DEFAULT_EMAIL_EXAMPLES`)를 **실제로 보냈던 메일 3통�
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 214개 테스트
+npm test           # 241개 테스트
 npm run build
 ```
 
@@ -320,6 +350,7 @@ OLLAMA_ORIGINS="https://<배포주소>" ollama serve
 lib/           도메인 로직 — React를 import하지 않는다
   worktree.ts    8개 업무 영역 정의 · 자연어 분류
   org.ts         기관 마스터 11개 · 별칭 매칭 · 회신 임계일
+  history.ts     이벤트 로그 · 파생 지표 · 영업일 계산
   capture.ts     한 줄 → 업무 1건 (기관·기한·상태 추출)
   mytask.ts      우선순위 점수 · 오늘/이번주/이번달 분류
   wbsStatus.ts   WBS 현재 상태 요약
@@ -339,7 +370,7 @@ components/    OverviewView · WorkTreeView · WbsView · RfpView · AiView
                QuickAdd · TaskRow · BrandMark · PromptPeek
                AiDailyReport · AiEmail · AiMinutes
 app/           page.tsx (셸 + 상태) · globals.css (디자인 토큰)
-tests/         214개
+tests/         241개
 ```
 
 **원칙 1** — 시간에 의존하는 함수는 전부 `today`를 인자로 받는다(`capture`, `score`, `bucket`, `summarize`, `generateDailyReport`, `generateMinutes`). 그래야 "오늘 기준"이 테스트 가능해진다.
@@ -354,7 +385,8 @@ tests/         214개
 
 ```
 tests/worktree.test.ts    14
-tests/org.test.ts         18  기관 마스터 · 별칭 매칭 · 후보 중복 · 빠른 입력 연결  분류 · 한 줄 캡처 · 여러 줄 등록
+tests/org.test.ts         18  기관 마스터 · 별칭 매칭 · 후보 중복 · 빠른 입력 연결
+tests/history.test.ts     27  영업일 · 파생 지표 · 리마인드 판정 · 점수 반영  분류 · 한 줄 캡처 · 여러 줄 등록
 tests/mytask.test.ts      15  우선순위 점수 · 시간 분류
 tests/wbs.test.ts         10  헤더 매핑 · 실제 파일 회귀
 tests/wbsStatus.test.ts   10  진짜 엑셀 → 현재 상태 요약

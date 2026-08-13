@@ -15,6 +15,7 @@ import {
   type LlmConfig,
 } from "@/lib/llm";
 import type { MyTask } from "@/lib/mytask";
+import type { TaskSignals } from "@/lib/history";
 
 type TabId = "daily" | "email" | "minutes";
 
@@ -35,6 +36,7 @@ const TABS: { id: TabId; label: string; sub: string }[] = [
 export default function AiView({
   today,
   tasks,
+  signals,
   projectName,
   department,
   onAdd,
@@ -42,6 +44,7 @@ export default function AiView({
 }: {
   today: string;
   tasks: MyTask[];
+  signals?: Map<string, TaskSignals>;
   projectName: string;
   department: string;
   onAdd: (tasks: MyTask[]) => void;
@@ -172,7 +175,7 @@ export default function AiView({
         ))}
       </div>
 
-      {tab === "daily" && <AiDailyReport today={today} tasks={tasks} makeCall={call} onCopy={copy} />}
+      {tab === "daily" && <AiDailyReport today={today} tasks={tasks} signals={signals} makeCall={call} onCopy={copy} />}
       {tab === "email" && (
         <AiEmail today={today} tasks={tasks} projectName={projectName} department={department} makeCall={call} onCopy={copy} />
       )}

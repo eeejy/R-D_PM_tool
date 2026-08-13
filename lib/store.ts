@@ -1,4 +1,5 @@
 import type { MyTask } from "./mytask";
+import type { TaskEvent } from "./history";
 import type { RfpDocument } from "./rfp";
 
 /**
@@ -15,6 +16,11 @@ export type Workspace = {
   department: string;
   /** 내가 해야 하는 업무 */
   tasks: MyTask[];
+  /**
+   * 업무에 일어난 사건. append-only이며 업무를 지워도 남는다.
+   * 인수인계와 리마인드가 전부 이 위에 얹힌다.
+   */
+  events: TaskEvent[];
   /** 마지막으로 읽은 WBS 파일명 */
   wbsName: string;
   /** 검색용 RFP 원문. 추출한 텍스트만 담는다(원본 파일은 보관하지 않음) */
@@ -23,7 +29,7 @@ export type Workspace = {
 };
 
 export function emptyWorkspace(): Workspace {
-  return { projectName: "CDX 연구개발사업", department: "", tasks: [], wbsName: "", rfp: null, updatedAt: "" };
+  return { projectName: "CDX 연구개발사업", department: "", tasks: [], events: [], wbsName: "", rfp: null, updatedAt: "" };
 }
 
 export function load(): Workspace | null {
@@ -32,7 +38,8 @@ export function load(): Workspace | null {
     const raw = window.localStorage.getItem(KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw) as Workspace;
-    return Array.isArray(parsed.tasks) ? parsed : null;
+    // 이벤트 로그가 없던 시절에 저장된 자료도 그대로 연다 — 빈 배열로 시작한다.
+    return Array.isArray(parsed.tasks) ? { ...parsed, events: parsed.events ?? [] } : null;
   } catch {
     return null; // 저장 형식이 바뀌었으면 조용히 초기 상태로 시작한다
   }
@@ -81,7 +88,7 @@ export function exportWorkspace(workspace: Workspace): void {
 export async function importWorkspace(file: File): Promise<Workspace | null> {
   try {
     const parsed = JSON.parse(await file.text()) as Workspace;
-    return Array.isArray(parsed.tasks) ? parsed : null;
+    return Array.isArray(parsed.tasks) ? { ...parsed, events: parsed.events ?? [] } : null;
   } catch {
     return null;
   }
