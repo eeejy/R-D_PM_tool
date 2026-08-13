@@ -7,7 +7,10 @@ import {
   classifyPlanType,
   generatePlanItem,
   normalize,
+  SHAPE_OF,
+  TYPE_ORDER,
   TYPE_SPEC,
+  typeLabel,
   validateItem,
   width,
 } from "../lib/weeklyPlan";
@@ -255,5 +258,103 @@ describe("생성 루프", () => {
       { bureau: "기획조정관", dept: "기획재정", titleSeed: "계획 수립", facts: "메모" }, null);
     expect(result.note).toMatch(/연결되지 않았습니다/);
     expect(result.type).toBe("T1_계획수립");
+  });
+});
+
+describe("서식 10종", () => {
+  it("원문 빈도순으로 10종을 둔다", () => {
+    expect(TYPE_ORDER).toHaveLength(10);
+    expect(TYPE_ORDER[0].id).toBe("T1_계획수립");   // 36건으로 가장 많다
+    const counts = TYPE_ORDER.map((item) => item.count);
+    expect([...counts].sort((a, b) => b - a)).toEqual(counts);
+  });
+
+  it("10종 전부 규칙과 예시를 갖는다", () => {
+    for (const item of TYPE_ORDER) {
+      expect(TYPE_SPEC[item.id].shots).toHaveLength(2);
+      expect(TYPE_SPEC[item.id].rules.length).toBeGreaterThan(0);
+      expect(typeLabel(item.id)).toBe(item.label);
+    }
+  });
+
+  it("업무성과·기타일정은 골격이 다르다", () => {
+    expect(SHAPE_OF.R1_업무성과).toBe("result");
+    expect(SHAPE_OF.E1_기타일정).toBe("schedule");
+    expect(SHAPE_OF.T1_계획수립).toBe("plan");
+  });
+});
+
+describe("업무성과 서식", () => {
+  const REAL = "① 민·관 대테러업무 혁신 TF 2차 전체회의 참석(2.26.)";
+
+  it("제목 한 줄이면 통과한다", () => {
+    // 원문 22건 전부 하위 라인이 0개였다
+    const check = validateItem(REAL, "R1_업무성과");
+    expect(check.errors).toEqual([]);
+    expect(check.ok).toBe(true);
+  });
+
+  it("업무계획 기준을 대면 떨어진다 — 그래서 서식을 나눴다", () => {
+    expect(validateItem(REAL, "T1_계획수립").ok).toBe(false);
+  });
+
+  it("본문을 붙이면 잡아낸다", () => {
+    const check = validateItem(`${REAL}\n- (주요내용) 붙이면 안 되는 본문`, "R1_업무성과");
+    expect(check.errors.join()).toMatch(/본문\(-\) 라인 1개/);
+  });
+
+  it("제목이 길면 잡아낸다", () => {
+    const long = `① ${"매우 긴 성과 제목".repeat(8)}(4.1)`;
+    expect(validateItem(long, "R1_업무성과").errors.join()).toMatch(/제목 \d+폭 → 70폭 이하로/);
+  });
+
+  it("담당과·태그 경고를 내지 않는다", () => {
+    // 업무성과에는 (담당과)도 [신규]도 붙이지 않는다
+    expect(validateItem(REAL, "R1_업무성과").warnings).toEqual([]);
+  });
+});
+
+describe("기타일정 서식", () => {
+  const REAL =
+    "① ’26년 정부조직 운영방향 논의를 위한 중앙부처 조직담당관 워크숍 참석\n" +
+    "※時/所/參 3.5.(목) / 세종컨벤션센터 / 代혁신행정법무담당관 등 3명";
+
+  it("제목 + 각주 1개를 통과시킨다", () => {
+    const check = validateItem(REAL, "E1_기타일정");
+    expect(check.errors).toEqual([]);
+  });
+
+  it("각주 없이 제목만 있어도 통과한다", () => {
+    // 날짜가 짧으면 제목에 인라인으로 넣는다
+    const check = validateItem("① 농해수위 전체회의(법안상정) 대응(3.11. / 청장 직무대행 등)", "E1_기타일정");
+    expect(check.errors).toEqual([]);
+  });
+
+  it("각주가 2개 이상이면 잡아낸다", () => {
+    expect(validateItem(`${REAL}\n* 추가 각주`, "E1_기타일정").errors.join()).toMatch(/각주 라인 2개/);
+  });
+
+  it("본문을 붙이면 잡아낸다", () => {
+    expect(validateItem(`${REAL}\n- (주요내용) 본문`, "E1_기타일정").errors.join()).toMatch(/본문\(-\) 라인/);
+  });
+});
+
+describe("서식별 프롬프트", () => {
+  const base = { bureau: "기획조정관", dept: "기획재정", titleSeed: "회의 참석", facts: "메모" };
+
+  it("업무성과에는 본문을 쓰지 말라고 한다", () => {
+    const prompt = buildPlanPrompt({ ...base, forceType: "R1_업무성과" });
+    expect(prompt).toMatch(/본문·각주 라인을 쓰지 않는다/);
+    expect(prompt).not.toMatch(/금지 구간/);
+  });
+
+  it("기타일정에는 각주 1개까지만 허용한다고 한다", () => {
+    const prompt = buildPlanPrompt({ ...base, forceType: "E1_기타일정" });
+    expect(prompt).toMatch(/0개 또는 1개만/);
+    expect(prompt).toMatch(/본문\(-\) 라인을 쓰지 않는다/);
+  });
+
+  it("업무계획에는 금지 구간을 알려준다", () => {
+    expect(buildPlanPrompt({ ...base, forceType: "T1_계획수립" })).toMatch(/82~99폭은 금지 구간/);
   });
 });

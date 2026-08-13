@@ -7,7 +7,9 @@ import {
   buildPlanPrompt,
   classifyPlanType,
   generatePlanItem,
-  TYPE_SPEC,
+  SHAPE_OF,
+  TYPE_ORDER,
+  typeLabel,
   validateItem,
   WEEKLY_LLM_OPTIONS,
   width,
@@ -26,12 +28,6 @@ import { loadLlmConfig, makeTextCall } from "@/lib/llm";
  * 그래서 이 화면만 생성 → 검증 → 재생성 루프를 돌고, 결과에 **위반 내역을 숫자로**
  * 함께 띄운다. 통과하지 못해도 초안과 위반 목록을 남겨 사람이 고칠 수 있게 한다.
  */
-const TYPE_LABELS: Record<PlanTypeId, string> = {
-  T1_계획수립: "계획수립", T2_법령제개정: "법령·제도 제개정", T3_회의행사: "회의·행사 개최",
-  T4_교육훈련: "교육·훈련", T5_점검조사: "점검·조사·분석", T6_연구용역: "연구용역·R&D",
-  T7_사업구축: "사업추진·시스템구축", T8_인력조직: "인력·조직 운영",
-};
-
 export default function AiWeeklyPlan({
   llmReady,
   onCopy,
@@ -56,7 +52,8 @@ export default function AiWeeklyPlan({
   const detected = useMemo(() => classifyPlanType(titleSeed), [titleSeed]);
 
   // 편집 중에도 규정 위반을 바로 보여준다 — 고치고 나서 다시 돌릴 필요가 없다
-  const liveCheck = useMemo(() => (edited.trim() ? validateItem(edited) : null), [edited]);
+  const type = forceType || detected;
+  const liveCheck = useMemo(() => (edited.trim() ? validateItem(edited, type) : null), [edited, type]);
 
   const run = async () => {
     if (!titleSeed.trim()) return;
@@ -111,12 +108,17 @@ export default function AiWeeklyPlan({
             <label className="field">
               <span>업무 유형</span>
               <select className="select" value={forceType} onChange={(e) => setForceType(e.target.value as PlanTypeId | "")}>
-                <option value="">자동 판정 — {TYPE_LABELS[detected]}</option>
-                {Object.keys(TYPE_SPEC).map((id) => (
-                  <option key={id} value={id}>{TYPE_LABELS[id as PlanTypeId]}</option>
+                {/* 원문 빈도순. 자주 쓰는 것이 위에 있어야 한다 */}
+                <option value="">자동 판정 — {typeLabel(detected)}</option>
+                {TYPE_ORDER.map((item) => (
+                  <option key={item.id} value={item.id}>{item.label} ({item.count}건)</option>
                 ))}
               </select>
-              <small>제목만으로 애매하면 직접 고르세요</small>
+              <small>
+                {SHAPE_OF[type] === "result" ? "제목 한 줄로 완결 — 본문·각주 없음"
+                  : SHAPE_OF[type] === "schedule" ? "제목 + 각주 0~1개 — 본문 없음"
+                  : "제목 + 본문 1~3 + 각주 0~2"}
+              </small>
             </label>
           </div>
 
@@ -164,7 +166,7 @@ export default function AiWeeklyPlan({
                 </span>
               </div>
               <div className="card__sub">
-                {TYPE_LABELS[result.type]} · {result.attempts}회 시도
+                {typeLabel(result.type)} · {result.attempts}회 시도
                 {result.stats.lines > 0 && ` · ${result.stats.lines}줄 ${result.stats.chars}자`}
               </div>
             </div>

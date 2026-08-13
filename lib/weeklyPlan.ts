@@ -73,11 +73,61 @@ export const BODY_DEAD_ZONE: readonly [number, number] = [82, 99];
 export const ITEM_TOTAL_LINES: readonly [number, number] = [4, 8];
 export const ITEM_TOTAL_CHARS: readonly [number, number] = [150, 330];
 
+/** 서식별 총량. 업무성과는 제목 한 줄로 끝나므로 업무계획 기준을 대면 안 된다. */
+export const SHAPE_BUDGET: Record<PlanShape, {
+  lines: readonly [number, number];
+  chars: readonly [number, number];
+  body: readonly [number, number];
+  note: readonly [number, number];
+}> = {
+  plan:     { lines: ITEM_TOTAL_LINES, chars: ITEM_TOTAL_CHARS, body: [1, 3], note: [0, 3] },
+  // 22건 전부 하위 라인 0개. 제목 한 줄로 완결한다.
+  result:   { lines: [1, 1], chars: [15, 90], body: [0, 0], note: [0, 0] },
+  // 제목 + 각주 0~1개. 날짜가 짧으면 제목에 인라인, 상세하면 ※ 각주로 뺀다.
+  schedule: { lines: [1, 2], chars: [15, 150], body: [0, 0], note: [0, 1] },
+};
+
 /* ── 2. 유형 분류 — 규칙 ────────────────────────────────── */
 
 export type PlanTypeId =
   | "T1_계획수립" | "T2_법령제개정" | "T3_회의행사" | "T4_교육훈련"
-  | "T5_점검조사" | "T6_연구용역" | "T7_사업구축" | "T8_인력조직";
+  | "T5_점검조사" | "T6_연구용역" | "T7_사업구축" | "T8_인력조직"
+  | "R1_업무성과" | "E1_기타일정";
+
+/**
+ * 서식 골격. **업무계획·업무성과·기타일정은 라인 구성 자체가 다르다.**
+ *
+ * 업무성과는 22건 전부 하위 라인이 0개였고, 기타일정은 제목 + 각주 0~1개다.
+ * 같은 검증기를 그대로 대면 둘 다 "본문 라인 없음"으로 떨어진다.
+ */
+export type PlanShape = "plan" | "result" | "schedule";
+
+export const SHAPE_OF: Record<PlanTypeId, PlanShape> = {
+  T1_계획수립: "plan", T2_법령제개정: "plan", T3_회의행사: "plan", T4_교육훈련: "plan",
+  T5_점검조사: "plan", T6_연구용역: "plan", T7_사업구축: "plan", T8_인력조직: "plan",
+  R1_업무성과: "result", E1_기타일정: "schedule",
+};
+
+/**
+ * 원문 실측 빈도. 화면에서 이 순서로 보여준다 — 자주 쓰는 것이 위에 있어야 한다.
+ * 업무계획 117건 + 업무성과 22건 + 기타일정 17건.
+ */
+export const TYPE_ORDER: { id: PlanTypeId; label: string; count: number }[] = [
+  { id: "T1_계획수립", label: "계획수립", count: 36 },
+  { id: "R1_업무성과", label: "업무성과", count: 22 },
+  { id: "T4_교육훈련", label: "교육·훈련", count: 19 },
+  { id: "T5_점검조사", label: "점검·조사·분석", count: 17 },
+  { id: "E1_기타일정", label: "기타일정", count: 17 },
+  { id: "T8_인력조직", label: "인력·조직 운영", count: 14 },
+  { id: "T7_사업구축", label: "사업추진·시스템구축", count: 10 },
+  { id: "T2_법령제개정", label: "법령·제도 제개정", count: 8 },
+  { id: "T3_회의행사", label: "회의·행사 개최", count: 7 },
+  { id: "T6_연구용역", label: "연구용역·R&D", count: 6 },
+];
+
+export function typeLabel(id: PlanTypeId): string {
+  return TYPE_ORDER.find((item) => item.id === id)?.label ?? id;
+}
 
 /** 위에서부터 먼저 걸리는 순서다. 우선순위를 바꾸려면 이 배열의 순서를 바꾼다. */
 const TYPE_RULES: { id: PlanTypeId; pattern: RegExp }[] = [
@@ -271,6 +321,33 @@ export const TYPE_SPEC: Record<PlanTypeId, TypeSpec> = {
       "* 일정 과기부 예산설명(4.10.)→국가심의위원회 대응(5월)→사업별 예산 대응(~12월)",
     ],
   },
+  R1_업무성과: {
+    labels: "제목 한 줄로 완결 — 하위 라인 없음",
+    rules: [
+      "본문(-)과 각주(*※)를 쓰지 않는다. 제목 한 줄로 끝낸다.",
+      "형식: 사안명 + 동사(참석/실시/개최/수검/대응) + (날짜)",
+      "국회·행사 대응은 날짜와 참석자를 함께 적는다. 예: (3.30. / 청장 직무대행 등)",
+      "지난주에 이미 끝난 일이므로 계획·전망을 쓰지 않는다.",
+    ],
+    shots: [
+      "① 민·관 대테러업무 혁신 TF 2차 전체회의 참석(2.26.)",
+      "① 3000톤급 경비함(태평양21호, 3021함) 진수식(4.1)",
+    ],
+  },
+  E1_기타일정: {
+    labels: "제목 + 각주 0~1개",
+    rules: [
+      "본문(-)을 쓰지 않는다. 제목과 각주만 쓴다.",
+      "날짜가 짧으면 제목에 괄호로 인라인, 상세하면 ※ 각주로 뺀다.",
+      "각주 압축표기를 쓴다: ※時/所/參 3.5.(목) / 장소 / 참석자 등 N명",
+    ],
+    shots: [
+      "① ’26년 정부조직 운영방향 논의를 위한 중앙부처 조직담당관 워크숍 참석\n" +
+      "※時/所/參 3.5.(목) / 세종컨벤션센터 / 代혁신행정법무담당관 등 3명",
+
+      "① 농해수위 전체회의(법안상정) 대응(3.11. / 청장 직무대행 등)",
+    ],
+  },
   T8_인력조직: {
     labels: "(추진배경) → (주요내용)",
     rules: [
@@ -353,13 +430,7 @@ export function buildPlanPrompt(input: PlanInput): string {
     spec.rules.map((rule, index) => `${index + 1}. ${rule}`).join("\n"),
     "",
     "━━━ 분량 제한 (표시폭 = 한글 2, 영문·숫자 1) ━━━",
-    `- 제목라인 : ${BUDGET.title.max}폭 이하 (한글 약 40자). 반드시 1줄.`,
-    "- 본문라인 : 다음 둘 중 하나만 허용",
-    `    · 짧은형: ${BUDGET.body1.max}폭 이하 (한글 약 39자)`,
-    `    · 표준형: ${BUDGET.body2.min}~${BUDGET.body2.max}폭 (한글 50~71자)`,
-    `  ※ ${BODY_DEAD_ZONE[0]}~${BODY_DEAD_ZONE[1]}폭은 금지 구간. 이 범위에 걸리면 늘리거나 줄여서 벗어날 것.`,
-    `- 각주라인 : ${BUDGET.note.max}폭 이하 (한글 약 47자). 반드시 1줄.`,
-    "- 항목 전체: 본문 1~3개 + 각주 1~2개, 총 200~300자.",
+    ...budgetLines(SHAPE_OF[type]),
     "",
     "━━━ 참고 예시 ━━━",
     spec.shots.map((shot, index) => `[예시 ${index + 1}]\n${shot}`).join("\n\n"),
@@ -373,6 +444,32 @@ export function buildPlanPrompt(input: PlanInput): string {
     "위 사실관계만 사용해 항목 1개를 작성하시오. 없는 수치나 일정을 지어내지 마시오.",
     "출력은 형식 라인만. 다른 말은 한 글자도 쓰지 마시오.",
   ].filter((line) => line !== "").join("\n");
+}
+
+/** 서식마다 지켜야 할 분량이 다르다. 업무계획 기준을 업무성과에 대면 안 된다. */
+function budgetLines(shape: PlanShape): string[] {
+  if (shape === "result") {
+    return [
+      `- 제목라인 : ${BUDGET.result.max}폭 이하 (한글 약 35자). 반드시 1줄.`,
+      "- 본문·각주 라인을 쓰지 않는다. 제목 한 줄이 전부다.",
+    ];
+  }
+  if (shape === "schedule") {
+    return [
+      `- 제목라인 : ${BUDGET.title.max}폭 이하. 반드시 1줄.`,
+      `- 각주라인 : ${BUDGET.note.max}폭 이하. 0개 또는 1개만.`,
+      "- 본문(-) 라인을 쓰지 않는다.",
+    ];
+  }
+  return [
+    `- 제목라인 : ${BUDGET.title.max}폭 이하 (한글 약 40자). 반드시 1줄.`,
+    "- 본문라인 : 다음 둘 중 하나만 허용",
+    `    · 짧은형: ${BUDGET.body1.max}폭 이하 (한글 약 39자)`,
+    `    · 표준형: ${BUDGET.body2.min}~${BUDGET.body2.max}폭 (한글 50~71자)`,
+    `  ※ ${BODY_DEAD_ZONE[0]}~${BODY_DEAD_ZONE[1]}폭은 금지 구간. 이 범위에 걸리면 늘리거나 줄여서 벗어날 것.`,
+    `- 각주라인 : ${BUDGET.note.max}폭 이하 (한글 약 47자). 반드시 1줄.`,
+    "- 항목 전체: 본문 1~3개 + 각주 1~2개, 총 200~300자.",
+  ];
 }
 
 /**
@@ -420,7 +517,9 @@ export type PlanCheck = { ok: boolean; errors: string[]; warnings: string[]; sta
  * 사례(표로 뺐어야 할 내용 등)다. **즉 이 검증기는 실제 문서보다 약간 엄격하다** —
  * 생성물은 늘 원문보다 느슨하게 나오므로 초안 가이드로는 이 정도가 맞다.
  */
-export function validateItem(text: string): PlanCheck {
+export function validateItem(text: string, type: PlanTypeId = "T1_계획수립"): PlanCheck {
+  const shape = SHAPE_OF[type];
+  const budget = SHAPE_BUDGET[shape];
   const errors: string[] = [];
   const warnings: string[] = [];
   const lines = String(text ?? "").trim().split("\n").map((line) => line.trimEnd()).filter((line) => line.trim());
@@ -436,11 +535,17 @@ export function validateItem(text: string): PlanCheck {
     if (NUM_MARKS.includes(line[0])) {
       stats.title += 1;
       stats.lines += 1;
-      if (w > BUDGET.title.hard) errors.push(`${row}행 제목 ${w}폭 → ${BUDGET.title.max}폭 이하로 ${w - BUDGET.title.max}폭 줄일 것`);
-      if (!/\([^()]{2,8}\)\s*$/.test(line) && stats.title === 1) {
+      const titleMax = shape === "result" ? BUDGET.result.max : BUDGET.title.max;
+      const titleHard = shape === "result" ? BUDGET.result.hard : BUDGET.title.hard;
+      if (w > titleHard) errors.push(`${row}행 제목 ${w}폭 → ${titleMax}폭 이하로 ${w - titleMax}폭 줄일 것`);
+      else if (w > titleMax) warnings.push(`${row}행 제목 ${w}폭 — 권장 ${titleMax}폭 이하`);
+      // 업무성과·기타일정에는 (담당과)를 붙이지 않는다
+      if (shape === "plan" && !/\([^()]{2,8}\)\s*$/.test(line) && stats.title === 1) {
         warnings.push(`${row}행 제목 끝에 (담당과) 표기 없음 — 단(團)·상황실은 생략 가능`);
       }
-      if (!/[[(](신규|진행|완료)[\])]/.test(line)) warnings.push(`${row}행 제목에 [신규]/[진행] 태그 없음`);
+      if (shape === "plan" && !/[[(](신규|진행|완료)[\])]/.test(line)) {
+        warnings.push(`${row}행 제목에 [신규]/[진행] 태그 없음`);
+      }
       return;
     }
 
@@ -474,16 +579,25 @@ export function validateItem(text: string): PlanCheck {
   });
 
   if (stats.title !== 1) errors.push(`제목 라인이 ${stats.title}개 (1개여야 함)`);
-  if (stats.body === 0) errors.push("본문 라인 없음 (최소 1개)");
-  if (stats.body > 3) errors.push(`본문 라인 ${stats.body}개 (최대 3개)`);
-  if (stats.note > 3) errors.push(`각주 라인 ${stats.note}개 (최대 3개)`);
-  if (stats.lines < ITEM_TOTAL_LINES[0] || stats.lines > ITEM_TOTAL_LINES[1]) {
-    errors.push(`항목 총 ${stats.lines}줄 (허용 ${ITEM_TOTAL_LINES[0]}~${ITEM_TOTAL_LINES[1]}줄, 권장 5~6줄)`);
+
+  if (stats.body < budget.body[0]) {
+    errors.push(budget.body[1] === 0 ? "본문(-) 라인을 쓰지 않는 서식" : "본문 라인 없음 (최소 1개)");
+  }
+  if (stats.body > budget.body[1]) {
+    errors.push(budget.body[1] === 0
+      ? `본문(-) 라인 ${stats.body}개 — 이 서식은 제목${budget.note[1] ? "과 각주만" : "만"} 쓴다`
+      : `본문 라인 ${stats.body}개 (최대 ${budget.body[1]}개)`);
+  }
+  if (stats.note > budget.note[1]) {
+    errors.push(`각주 라인 ${stats.note}개 (최대 ${budget.note[1]}개)`);
+  }
+  if (stats.lines < budget.lines[0] || stats.lines > budget.lines[1]) {
+    errors.push(`항목 총 ${stats.lines}줄 (허용 ${budget.lines[0]}~${budget.lines[1]}줄)`);
   }
 
   stats.chars = lines.reduce((sum, line) => sum + line.trim().length, 0);
-  if (stats.chars < ITEM_TOTAL_CHARS[0] || stats.chars > ITEM_TOTAL_CHARS[1]) {
-    errors.push(`항목 총 ${stats.chars}자 (허용 ${ITEM_TOTAL_CHARS[0]}~${ITEM_TOTAL_CHARS[1]}자, 권장 200~300자)`);
+  if (stats.chars < budget.chars[0] || stats.chars > budget.chars[1]) {
+    errors.push(`항목 총 ${stats.chars}자 (허용 ${budget.chars[0]}~${budget.chars[1]}자)`);
   }
 
   if (/(습니다|입니다|합니다)/.test(text)) errors.push("서술형 종결어미 사용 — 개조식 명사형으로 바꿀 것");
@@ -559,12 +673,12 @@ export async function generatePlanItem(
 
   try {
     let text = normalize(await call(buildPlanPrompt(input), WEEKLY_SYSTEM));
-    let check = validateItem(text);
+    let check = validateItem(text, type);
     let attempts = 1;
 
     while (!check.ok && attempts <= maxRetry) {
       text = normalize(await call(buildRetryPrompt(text, check.errors), WEEKLY_SYSTEM));
-      check = validateItem(text);
+      check = validateItem(text, type);
       attempts += 1;
     }
 
