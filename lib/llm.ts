@@ -52,7 +52,9 @@ export type LlmErrorKind =
   /** JSON은 나왔지만 약속한 모양이 아님 */
   | "schema"
   /** 사용자가 중단 */
-  | "aborted";
+  | "aborted"
+  /** 제한 시간을 넘김 */
+  | "timeout";
 
 export class LlmError extends Error {
   constructor(
@@ -75,7 +77,17 @@ export const ERROR_HINT: Record<LlmErrorKind, string> = {
   parse: "모델이 JSON이 아닌 답을 돌려줬습니다. 다시 시도하거나 더 큰 모델을 쓰세요.",
   schema: "모델 응답이 약속한 형식과 달라 규칙 기반 결과로 대체했습니다.",
   aborted: "",
+  timeout: "모델이 제한 시간 안에 답하지 않았습니다. 더 작은 입력으로 다시 시도하거나 모델을 바꿔 보세요.",
 };
+
+/**
+ * 한 번 호출의 제한 시간.
+ *
+ * **이 값이 없으면 로딩이 영원히 풀리지 않는다.** Ollama가 연결은 받아 놓고 답을
+ * 못 하면 fetch가 끝나지 않아 화면이 "생성 중…"에 멈춘다. 8B가 긴 입력에서 실제로
+ * 그런다. 어떤 경로로도 로딩이 안 풀리는 일이 없어야 한다.
+ */
+export const DEFAULT_TIMEOUT_MS = 60_000;
 
 /** 브라우저가 보안 출처로 취급하는 로컬 주소. Ollama가 기본으로 허용하는 범위이기도 하다. */
 export function isLocalOrigin(origin: string): boolean {
@@ -180,6 +192,8 @@ export async function complete(
     config?: Partial<LlmConfig>;
     format?: "json" | "text" | object;
     signal?: AbortSignal;
+    /** 제한 시간(ms). 0을 주면 걸지 않는다 — 테스트에서만 쓴다. */
+    timeoutMs?: number;
     fetchImpl?: typeof fetch;
   } = {},
 ): Promise<string> {
@@ -187,19 +201,38 @@ export async function complete(
   const doFetch = options.fetchImpl ?? fetch;
   const body = buildRequest(prompt, options);
 
+  // 사용자 중단과 제한 시간을 하나의 신호로 합친다. AbortSignal.any는 아직 못 쓰는
+  // 브라우저가 있어 직접 엮는다.
+  const limit = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const controller = new AbortController();
+  let timedOut = false;
+  const timer = limit > 0
+    ? setTimeout(() => { timedOut = true; controller.abort(); }, limit)
+    : null;
+  const onAbort = () => controller.abort();
+  options.signal?.addEventListener("abort", onAbort);
+  if (options.signal?.aborted) controller.abort();
+
   let response: Response;
   try {
     response = await doFetch(`${config.endpoint.replace(/\/$/, "")}/api/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
-      signal: options.signal,
+      signal: controller.signal,
     });
   } catch (cause) {
+    if (timedOut) {
+      throw new LlmError("timeout", `${Math.round(limit / 1000)}초 안에 응답이 오지 않았습니다.`, ERROR_HINT.timeout);
+    }
     if (cause instanceof DOMException && cause.name === "AbortError") {
       throw new LlmError("aborted", "중단했습니다.");
     }
     throw new LlmError("offline", "Ollama에 연결하지 못했습니다.", ERROR_HINT.offline);
+  } finally {
+    // 어떤 경로로 빠져나가도 타이머와 리스너를 반드시 정리한다
+    if (timer) clearTimeout(timer);
+    options.signal?.removeEventListener("abort", onAbort);
   }
 
   if (!response.ok) {
@@ -233,7 +266,7 @@ export type LlmCall = (prompt: string, system?: string) => Promise<string>;
  */
 export function makeTextCall(
   config: Partial<LlmConfig>,
-  options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; fetchImpl?: typeof fetch } = {},
 ): LlmCall {
   return (prompt, system) => complete(prompt, { ...options, config, system, format: "text" });
 }
@@ -241,7 +274,7 @@ export function makeTextCall(
 /** 설정으로 고정한 호출 함수를 만든다. */
 export function makeCall(
   config: Partial<LlmConfig>,
-  options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+  options: { signal?: AbortSignal; timeoutMs?: number; fetchImpl?: typeof fetch } = {},
 ): LlmCall {
   return (prompt, system) => complete(prompt, { ...options, config, system });
 }

@@ -8,6 +8,7 @@ import {
   parseResponse,
   DEFAULT_LLM_CONFIG,
   connectionHint,
+  DEFAULT_TIMEOUT_MS,
   isLocalOrigin,
 } from "../lib/llm";
 
@@ -190,5 +191,37 @@ describe("connectionHint", () => {
     expect(isLocalOrigin("https://localhost")).toBe(true);
     expect(isLocalOrigin("https://mylocalhost.com")).toBe(false);
     expect(isLocalOrigin("https://rnd-flow.vercel.app")).toBe(false);
+  });
+});
+
+describe("제한 시간", () => {
+  it("응답이 오지 않으면 60초 안에 풀린다", async () => {
+    // 이 장치가 없으면 화면이 "생성 중…"에서 영원히 멈춘다
+    const hang = ((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    })) as unknown as typeof fetch;
+
+    await expect(complete("안녕", { fetchImpl: hang, timeoutMs: 30 }))
+      .rejects.toMatchObject({ kind: "timeout" });
+  });
+
+  it("사용자 중단은 timeout과 구분한다", async () => {
+    const controller = new AbortController();
+    const hang = ((_url: string, init: RequestInit) => new Promise<Response>((_, reject) => {
+      init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")));
+    })) as unknown as typeof fetch;
+
+    const promise = complete("안녕", { fetchImpl: hang, signal: controller.signal, timeoutMs: 5000 });
+    controller.abort();
+    await expect(promise).rejects.toMatchObject({ kind: "aborted" });
+  });
+
+  it("정상 응답에는 영향이 없다", async () => {
+    const raw = await complete("안녕", { fetchImpl: fakeFetch({ response: "ok" }), timeoutMs: 5000 });
+    expect(raw).toBe("ok");
+  });
+
+  it("기본 제한 시간이 정해져 있다", () => {
+    expect(DEFAULT_TIMEOUT_MS).toBeGreaterThan(0);
   });
 });
