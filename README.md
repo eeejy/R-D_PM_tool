@@ -236,7 +236,7 @@ few-shot 예시(`DEFAULT_EMAIL_EXAMPLES`)를 **실제로 보냈던 메일 3통�
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 191개 테스트
+npm test           # 192개 테스트
 npm run build
 ```
 
@@ -274,7 +274,7 @@ components/    OverviewView · WorkTreeView · WbsView · RfpView · AiView
                QuickAdd · TaskRow · BrandMark · PromptPeek
                AiDailyReport · AiEmail · AiMinutes
 app/           page.tsx (셸 + 상태) · globals.css (디자인 토큰)
-tests/         191개
+tests/         192개
 ```
 
 **원칙 1** — 시간에 의존하는 함수는 전부 `today`를 인자로 받는다(`capture`, `score`, `bucket`, `summarize`, `generateDailyReport`, `generateMinutes`). 그래야 "오늘 기준"이 테스트 가능해진다.
@@ -288,7 +288,7 @@ tests/         191개
 ## 테스트
 
 ```
-tests/worktree.test.ts    13  분류 · 한 줄 캡처 · 여러 줄 등록
+tests/worktree.test.ts    14  분류 · 한 줄 캡처 · 여러 줄 등록
 tests/mytask.test.ts      15  우선순위 점수 · 시간 분류
 tests/wbs.test.ts         10  헤더 매핑 · 실제 파일 회귀
 tests/wbsStatus.test.ts   10  진짜 엑셀 → 현재 상태 요약

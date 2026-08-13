@@ -64,7 +64,9 @@ export function capture(text: string, today: string): Draft {
 export function captureMany(text: string, today: string): Draft[] {
   return text
     .split(/\n+/)
-    .map((line) => line.replace(/^[-•*\d.)\s]+/, "").trim())
+    // 공공문서에서 붙여넣으면 □·ㅇ·○ 같은 글머리가 그대로 딸려 온다.
+    // 지우지 않으면 업무 제목이 "□ 데이터 체계 구축"이 되고 분류 키워드도 밀린다.
+    .map((line) => line.replace(/^[-•*○◯□■◇◆▶▪·ㆍㅇ\d.)\s]+/, "").trim())
     .filter((line) => line.replace(/\s/g, "").length >= 4)
     .map((line) => capture(line, today));
 }
