@@ -75,3 +75,13 @@ describe("capture", () => {
     expect(captureMany("ok\n확인", TODAY)).toHaveLength(0);
   });
 });
+
+describe("공공문서 붙여넣기", () => {
+  it("□·ㅇ 같은 글머리를 떼고 읽는다", () => {
+    // 공고문·회의록을 그대로 붙여넣으면 글머리가 딸려 와 제목과 분류를 망친다
+    const drafts = captureMany("□ 해양재난 데이터 체계 구축\nㅇ 실증 대상지 협의", "2026-08-13");
+    expect(drafts[0].title.startsWith("□")).toBe(false);
+    expect(drafts[0].categoryId).toBe("data");
+    expect(drafts[1].title.startsWith("ㅇ")).toBe(false);
+  });
+});
