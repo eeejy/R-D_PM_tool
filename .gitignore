@@ -13,3 +13,4 @@ small.png
 
 # 설치 시 생성 (scripts/copy-pdf-worker.mjs)
 public/pdf.worker.min.mjs
+.vercel
