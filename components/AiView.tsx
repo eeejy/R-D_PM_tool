@@ -6,6 +6,7 @@ import AiEmail from "./AiEmail";
 import AiMinutes from "./AiMinutes";
 import {
   checkOllama,
+  connectionHint,
   DEFAULT_LLM_CONFIG,
   loadLlmConfig,
   makeCall,
@@ -51,9 +52,12 @@ export default function AiView({
   const [models, setModels] = useState<string[] | null>(null);
   const [checking, setChecking] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** 배포된 주소에서는 연결 실패의 원인이 달라진다 — 안내를 바꾸기 위해 들고 있는다. */
+  const [pageOrigin, setPageOrigin] = useState("");
 
   useEffect(() => {
     setConfig(loadLlmConfig());
+    setPageOrigin(window.location.origin);
   }, []);
 
   const check = useCallback(async (target: LlmConfig) => {
@@ -110,7 +114,7 @@ export default function AiView({
                 : `${config.model}을(를) 찾지 못함`}
             </b>
             <small>
-              {!connected ? "터미널에서 `ollama serve` 실행 후 다시 확인해 주세요. 연결 없이도 규칙 기반 결과는 나옵니다."
+              {!connected ? `${connectionHint(pageOrigin)} 연결 없이도 규칙 기반 결과는 나옵니다.`
                 : ready ? `${config.endpoint} · 컨텍스트 ${config.numCtx.toLocaleString()} 토큰`
                 : `받아 둔 모델: ${models?.join(", ") || "없음"} · \`ollama pull ${config.model}\``}
             </small>

@@ -236,7 +236,7 @@ few-shot 예시(`DEFAULT_EMAIL_EXAMPLES`)를 **실제로 보냈던 메일 3통�
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 192개 테스트
+npm test           # 196개 테스트
 npm run build
 ```
 
@@ -247,6 +247,36 @@ node scripts/make-samples.mjs   # 테스트용 샘플 WBS 재생성
 ```
 
 **브랜드 아이콘**은 `public/brand-icon.png`를 쓴다(사이드바·파비콘 공통). 원본 아트워크는 손대지 않고 **주변 여백만** 잘라 정사각으로 맞췄다 — 원본은 캔버스의 52%만 그림이라 표시 크기를 키워도 로고가 작아 보였다. 원본은 `public/brand-icon-original.png`에 그대로 남겨 뒀고, 여백 제거는 `scripts/`의 절차를 다시 돌리면 재현된다. 파일이 없으면 벡터 마스코트로 떨어진다.
+
+---
+
+## 배포
+
+Vercel에 그대로 올라간다(설정 파일 없음). 다만 **LLM 기능은 배포한다고 따라오지 않는다.**
+
+브라우저가 `localhost:11434`를 부르는 구조는 그대로지만, 페이지 출처가 배포 도메인으로
+바뀌면 Ollama가 **서버가 켜져 있어도** 403을 돌려준다. 실측한 값이다.
+
+```
+Origin: http://localhost:3000        → 200 OK
+Origin: https://<배포주소>            → 403 Forbidden
+```
+
+쓰려면 각자 자기 컴퓨터에서 Ollama에 그 출처를 허용해 줘야 한다.
+
+```bash
+OLLAMA_ORIGINS="https://<배포주소>" ollama serve
+```
+
+그래서 `보고 생성` 화면은 페이지 주소를 보고 안내를 바꾼다 — 로컬이면 `ollama serve`를,
+배포 주소면 `OLLAMA_ORIGINS`를 알려 준다(`connectionHint`). 틀린 곳을 가리키는 안내가
+가장 오래 헤매게 만들기 때문이다.
+
+**RFP 검색·연구개발 현황·업무트리는 배포판에서 아무 설정 없이 그대로 동작한다.** 보고
+생성도 화면은 열리고, 모델이 없으면 규칙 문장으로 떨어진다.
+
+> 공개 주소로 올리면 누구나 앱에 접근할 수 있다. 데이터는 각자 브라우저에만 남으므로
+> 자료가 새지는 않지만, 기관 도입 단계에서는 위에 적은 계정·권한 통제가 먼저다.
 
 ---
 
@@ -274,7 +304,7 @@ components/    OverviewView · WorkTreeView · WbsView · RfpView · AiView
                QuickAdd · TaskRow · BrandMark · PromptPeek
                AiDailyReport · AiEmail · AiMinutes
 app/           page.tsx (셸 + 상태) · globals.css (디자인 토큰)
-tests/         192개
+tests/         196개
 ```
 
 **원칙 1** — 시간에 의존하는 함수는 전부 `today`를 인자로 받는다(`capture`, `score`, `bucket`, `summarize`, `generateDailyReport`, `generateMinutes`). 그래야 "오늘 기준"이 테스트 가능해진다.
@@ -295,7 +325,7 @@ tests/wbsStatus.test.ts   10  진짜 엑셀 → 현재 상태 요약
 tests/nlp.test.ts         15  한국어 날짜·기관 추출
 tests/rfp.test.ts         17  RFP 검색 랭킹 · 부분일치 · 하이라이트
 tests/rfpParse.test.ts     6  형식 판별 · 쪽 나누기 · 빈 문서 처리
-tests/llm.test.ts         20  요청 구성(num_ctx) · JSON 추출 · 오류 분류 · HTTP 왕복
+tests/llm.test.ts         24  요청 구성(num_ctx) · JSON 추출 · 오류 분류 · HTTP 왕복
 tests/dailyReport.test.ts 30  보고 대상 선별 · 상부/연구책임자 분류 · 응답 검증
 tests/emailDraft.test.ts  21  템플릿 조립 · 기관·날짜 주입 · 편집 반영
 tests/minutes.test.ts     34  안건 분할 · 회의정보 추출 · 병합 · 1p 보고서

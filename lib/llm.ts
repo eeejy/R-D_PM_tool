@@ -73,6 +73,24 @@ export const ERROR_HINT: Record<LlmErrorKind, string> = {
   aborted: "",
 };
 
+/** 브라우저가 보안 출처로 취급하는 로컬 주소. Ollama가 기본으로 허용하는 범위이기도 하다. */
+export function isLocalOrigin(origin: string): boolean {
+  return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/i.test(String(origin ?? "").trim());
+}
+
+/**
+ * 연결 실패 안내.
+ *
+ * 배포된 주소에서 열면 Ollama가 **서버가 켜져 있어도** 출처를 보고 403을 돌려준다.
+ * 이때 "ollama serve를 실행하세요"라고 안내하면 틀린 곳을 가리키게 되므로,
+ * 페이지 주소를 보고 실제로 해야 할 일을 알려 준다.
+ */
+export function connectionHint(pageOrigin: string): string {
+  if (!pageOrigin || isLocalOrigin(pageOrigin)) return ERROR_HINT.offline;
+  const origin = pageOrigin.replace(/\/$/, "");
+  return `이 주소에서 로컬 모델을 쓰려면 Ollama가 이 출처를 허용해야 합니다 — 터미널에서 OLLAMA_ORIGINS="${origin}" ollama serve 로 다시 띄워 주세요.`;
+}
+
 export type LlmRequest = {
   model: string;
   prompt: string;

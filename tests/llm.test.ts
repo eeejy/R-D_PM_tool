@@ -7,6 +7,8 @@ import {
   LlmError,
   parseResponse,
   DEFAULT_LLM_CONFIG,
+  connectionHint,
+  isLocalOrigin,
 } from "../lib/llm";
 
 /** 응답 하나만 돌려주는 가짜 fetch. 네트워크를 타지 않는다. */
@@ -164,5 +166,29 @@ describe("checkOllama", () => {
     const dead = (async () => { throw new TypeError("fetch failed"); }) as unknown as typeof fetch;
     const status = await checkOllama({}, dead);
     expect(status.ok).toBe(false);
+  });
+});
+
+describe("connectionHint", () => {
+  it("로컬에서는 서버를 띄우라고 안내한다", () => {
+    expect(connectionHint("http://localhost:3000")).toMatch(/ollama serve/);
+    expect(connectionHint("http://127.0.0.1:3000")).toMatch(/ollama serve/);
+  });
+
+  it("배포된 주소에서는 OLLAMA_ORIGINS를 안내한다", () => {
+    // 서버가 켜져 있어도 Ollama가 출처를 보고 403을 준다. 실측으로 확인한 동작이다.
+    const hint = connectionHint("https://rnd-flow.vercel.app");
+    expect(hint).toMatch(/OLLAMA_ORIGINS="https:\/\/rnd-flow\.vercel\.app"/);
+  });
+
+  it("주소를 모르면 기본 안내로 둔다", () => {
+    expect(connectionHint("")).toMatch(/ollama serve/);
+  });
+
+  it("로컬 주소를 구분한다", () => {
+    expect(isLocalOrigin("http://localhost:3000")).toBe(true);
+    expect(isLocalOrigin("https://localhost")).toBe(true);
+    expect(isLocalOrigin("https://mylocalhost.com")).toBe(false);
+    expect(isLocalOrigin("https://rnd-flow.vercel.app")).toBe(false);
   });
 });
