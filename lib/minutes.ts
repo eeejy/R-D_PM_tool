@@ -72,7 +72,10 @@ export function splitAgenda(text: string): Segment[] {
 
   const merged = blocks
     .map((block) => ({ heading: block.heading, text: block.lines.join("\n").trim() }))
-    .filter((block) => block.text.length > 0);
+    .filter((block) => block.text.length > 0)
+    // 머리말(회의명·일시·참석자)은 안건이 아니다. 남겨 두면 호출이 한 번 늘고
+    // 안건 번호가 통째로 한 칸씩 밀려 원문을 되짚을 때 헷갈린다.
+    .filter((block, order) => !(order === 0 && !block.heading && isMetaBlock(block.text)));
 
   // 경계를 하나도 못 찾았으면 문단으로라도 나눈다. 통째로 던지는 것보다 늘 낫다.
   const source = merged.length > 1 ? merged : splitByParagraph(merged[0]?.text ?? String(text ?? ""));
@@ -86,6 +89,14 @@ export function splitAgenda(text: string): Segment[] {
     });
   }
   return segments.filter((segment) => segment.text.replace(/\s/g, "").length >= 10);
+}
+
+/** 회의록 머리말에만 나오는 항목들. 이 줄만으로 이뤄진 블록은 안건이 아니다. */
+const META_LINE = /^\s*(?:회의\s*명|제\s*목|건\s*명|일\s*시|일\s*자|날\s*짜|장\s*소|참\s*석\s*자?|참\s*여\s*자|배\s*석|작\s*성\s*자|주\s*관)\s*[:：]/;
+
+function isMetaBlock(text: string): boolean {
+  const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  return lines.length > 0 && lines.every((line) => META_LINE.test(line));
 }
 
 function splitByParagraph(text: string): { heading: string; text: string }[] {
@@ -220,8 +231,33 @@ export type SegmentResult = {
   actions: Omit<Action, "sourceSegment">[];
 };
 
-/** 세 배열 중 하나라도 배열로 오면 받아들인다. 셋 다 아니면 형식 위반으로 본다. */
-export function validateSegmentOutput(value: unknown): SegmentResult | null {
+/**
+ * 모델이 돌려준 기한이 원문에 실제로 적혀 있는지 확인한다.
+ *
+ * 8B 모델은 "이달 말까지"를 자기 마음대로 8월 31일로 바꿔 온다. 그럴듯하지만
+ * 이건 모델이 한 날짜 계산이고, 이 앱은 **날짜를 추측하지 않는다**는 규칙으로
+ * 빠른 입력(`capture.ts`)부터 일관되게 지켜 왔다. 원문에 없는 날짜는 버리고
+ * 기한 미정으로 남긴 뒤 사람이 채우게 한다.
+ */
+export function dateGroundedIn(iso: string, source: string): boolean {
+  const [year, month, day] = iso.split("-").map(Number);
+  if (!year || !month || !day) return false;
+  const text = source.replace(/\s+/g, "");
+  const patterns = [
+    new RegExp(`${year}[-./년]0?${month}[-./월]0?${day}`),
+    new RegExp(`0?${month}월0?${day}일`),
+    new RegExp(`(^|[^\\d])0?${month}[./-]0?${day}([^\\d]|$)`),
+    new RegExp(`(^|[^\\d])0?${day}일`),
+  ];
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+/**
+ * 세 배열 중 하나라도 배열로 오면 받아들인다. 셋 다 아니면 형식 위반으로 본다.
+ *
+ * `source`를 주면 원문에 없는 기한을 걸러낸다. 호출부는 항상 안건 원문을 넘긴다.
+ */
+export function validateSegmentOutput(value: unknown, source = ""): SegmentResult | null {
   if (!isRecord(value)) return null;
   const hasAny = ["issues", "decisions", "actions"].some((key) => Array.isArray(value[key]));
   if (!hasAny) return null;
@@ -251,11 +287,13 @@ export function validateSegmentOutput(value: unknown): SegmentResult | null {
         }
         const text = oneLine(entry.text ?? entry.action ?? entry.task);
         if (!text) return null;
+        // 날짜는 형식이 맞고 원문에 실제로 적혀 있을 때만 받는다.
+        // "다음 주"처럼 온 값도, 모델이 계산해 만든 값도 버리고 비워 둔다.
+        const due = parseCellDate(asText(entry.due ?? entry.deadline));
         return {
           text,
           owner: oneLine(entry.owner ?? entry.assignee ?? entry.기관),
-          // 날짜는 형식이 맞을 때만 받는다. "다음 주"처럼 온 값은 버리고 비워 둔다.
-          due: parseCellDate(asText(entry.due ?? entry.deadline)),
+          due: !due || !source || dateGroundedIn(due, source) ? due : "",
         };
       })
       .filter((entry): entry is Omit<Action, "sourceSegment"> => entry !== null),
@@ -323,7 +361,7 @@ export async function generateMinutes(
     if (options.signal?.aborted) break;
     try {
       const raw = await call(buildSegmentPrompt(segment, meta), MINUTES_SYSTEM);
-      results.push(parseResponse(raw, validateSegmentOutput));
+      results.push(parseResponse(raw, (value) => validateSegmentOutput(value, segment.text)));
     } catch {
       // 한 안건이 실패해도 나머지는 계속한다. 실패한 번호는 결과에 남는다.
       results.push(null);

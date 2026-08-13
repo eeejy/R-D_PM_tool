@@ -8,6 +8,7 @@ import {
   renderOnePager,
   splitAgenda,
   validateSegmentOutput,
+  dateGroundedIn,
   type Action,
 } from "../lib/minutes";
 
@@ -74,6 +75,18 @@ describe("안건 분할 — 룰", () => {
     expect(Math.max(...segments.map((segment) => segment.text.length))).toBeLessThanOrEqual(MAX_SEGMENT_CHARS + 200);
   });
 
+  it("머리말은 안건으로 세지 않는다", () => {
+    // 회의명·일시·참석자 블록이 안건 1이 되면 호출이 한 번 늘고 번호가 전부 밀린다
+    const segments = splitAgenda(MINUTES);
+    expect(segments).toHaveLength(3);
+    expect(segments[0].heading).toBe("1. 데이터 수급 현황");
+  });
+
+  it("머리말 뒤에 본문이 붙어 있으면 버리지 않는다", () => {
+    const text = "일시: 2026-08-12\n논의 내용이 여기에 바로 이어집니다.\n\n1. 첫 안건\n내용";
+    expect(splitAgenda(text)[0].text).toMatch(/논의 내용/);
+  });
+
   it("빈 회의록은 빈 배열", () => {
     expect(splitAgenda("")).toEqual([]);
   });
@@ -119,6 +132,24 @@ describe("응답 검증", () => {
   it("날짜 형식이 아닌 기한은 버린다 — 억지로 날짜를 만들지 않는다", () => {
     const parsed = validateSegmentOutput({ actions: [{ text: "정리", due: "다음 주까지" }] });
     expect(parsed?.actions[0].due).toBe("");
+  });
+
+  it("원문에 없는 날짜는 버린다 — 모델이 한 날짜 계산을 믿지 않는다", () => {
+    // "이달 말까지"를 8월 31일로 바꿔 오는 건 8B 모델이 실제로 하는 행동이다
+    const source = "증액 요구안을 이달 말까지 정리하기로 함.";
+    expect(validateSegmentOutput({ actions: [{ text: "정리", due: "2026-08-31" }] }, source)?.actions[0].due).toBe("");
+  });
+
+  it("원문에 적힌 날짜는 그대로 받는다", () => {
+    const source = "잔여 1종은 8월 18일까지 송부하기로 함.";
+    expect(validateSegmentOutput({ actions: [{ text: "송부", due: "2026-08-18" }] }, source)?.actions[0].due).toBe("2026-08-18");
+  });
+
+  it("여러 표기를 근거로 인정한다", () => {
+    expect(dateGroundedIn("2026-08-18", "2026-08-18까지")).toBe(true);
+    expect(dateGroundedIn("2026-08-18", "8/18까지")).toBe(true);
+    expect(dateGroundedIn("2026-08-18", "18일까지 송부")).toBe(true);
+    expect(dateGroundedIn("2026-08-18", "3종 중 2종만 제공")).toBe(false);
   });
 
   it("모양이 아예 다르면 null", () => {

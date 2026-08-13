@@ -213,7 +213,13 @@ few-shot 예시(`DEFAULT_EMAIL_EXAMPLES`)를 **실제로 보냈던 메일 3통�
 출력에서 받지 않고 호출한 쪽이 붙인다 — 모델이 번호를 지어낼 여지를 없앤다.
 
 회의 제목·일시·참석자도 규칙으로 뽑는다. 정해진 자리에 적혀 있는 값이고, 모델에
-맡기면 참석자 이름을 가장 먼저 지어낸다.
+맡기면 참석자 이름을 가장 먼저 지어낸다. 머리말 블록은 안건으로 세지 않는다 —
+남겨 두면 호출이 한 번 늘고 안건 번호가 통째로 한 칸씩 밀린다.
+
+**모델이 돌려준 기한은 원문에 실제로 적혀 있을 때만 받는다.** qwen3:8b는 "이달
+말까지"를 8월 31일로 바꿔 온다. 그럴듯하지만 이건 모델이 한 날짜 계산이고, 이 앱은
+빠른 입력부터 **날짜를 추측하지 않는다**는 규칙을 지켜 왔다. 근거 없는 날짜는 버리고
+기한 미정으로 남긴 뒤 사람이 채우게 한다(`dateGroundedIn`).
 
 추출된 후속조치는 기존 빠른 입력(`lib/capture.ts`)을 통해 **업무로 바로 등록된다.**
 회의록 → 업무 자동 등록이 이 기능의 진짜 값어치다.
@@ -228,7 +234,7 @@ few-shot 예시(`DEFAULT_EMAIL_EXAMPLES`)를 **실제로 보냈던 메일 3통�
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 186개 테스트
+npm test           # 191개 테스트
 npm run build
 ```
 
@@ -266,7 +272,7 @@ components/    OverviewView · WorkTreeView · WbsView · RfpView · AiView
                QuickAdd · TaskRow · BrandMark · PromptPeek
                AiDailyReport · AiEmail · AiMinutes
 app/           page.tsx (셸 + 상태) · globals.css (디자인 토큰)
-tests/         186개
+tests/         191개
 ```
 
 **원칙 1** — 시간에 의존하는 함수는 전부 `today`를 인자로 받는다(`capture`, `score`, `bucket`, `summarize`). 그래야 "오늘 기준"이 테스트 가능해진다.
@@ -290,7 +296,7 @@ tests/rfpParse.test.ts     6  형식 판별 · 쪽 나누기 · 빈 문서 처�
 tests/llm.test.ts         20  요청 구성(num_ctx) · JSON 추출 · 오류 분류 · HTTP 왕복
 tests/dailyReport.test.ts 30  보고 대상 선별 · 상부/연구책임자 분류 · 응답 검증
 tests/emailDraft.test.ts  21  템플릿 조립 · 기관·날짜 주입 · 편집 반영
-tests/minutes.test.ts     29  안건 분할 · 회의정보 추출 · 병합 · 1p 보고서
+tests/minutes.test.ts     34  안건 분할 · 회의정보 추출 · 병합 · 1p 보고서
 ```
 
 **LLM이 생성한 문장 자체는 테스트하지 않는다.** 매번 달라지므로 테스트 대상이 될 수 없다.
@@ -305,6 +311,12 @@ tests/minutes.test.ts     29  안건 분할 · 회의정보 추출 · 병합 · 
 - `이번 주까지 요청`이 요청이 아니라 확인으로 분류됨 → 상태 규칙 정비
 - 엑셀 날짜가 자정에서 8초 어긋나 있어 잘라내면 `2026-01-01`이 `2025-12-31`이 됨 → 반올림
 - 코드 매핑 시트의 *안내 문장*이 헤더로 오인됨 → 헤더 행 판정에 길이·칸 수 조건 추가
+
+qwen3:8b로 실제 돌려 보고 잡은 것들:
+
+- 회의록 머리말(회의명·일시·참석자)이 안건 1로 잡혀 호출이 한 번 늘고 안건 번호가 전부 한 칸씩 밀림
+- 모델이 "이달 말까지"를 `2026-08-31`로 바꿔 보냄 → 원문에 없는 날짜를 버리는 검증 추가
+- 줄바꿈 없이 붙여넣은 긴 회의록이 줄 경계로는 안 잘려 그대로 통째로 나감 → 문장·글자 수 순으로 물러서게 함
 
 ---
 
