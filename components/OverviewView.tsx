@@ -5,6 +5,8 @@ import QuickAdd from "./QuickAdd";
 import TaskRow from "./TaskRow";
 import { bucket, type MyTask } from "@/lib/mytask";
 import type { TaskSignals } from "@/lib/history";
+import { openIssues, type TrackItem } from "@/lib/track";
+import { orgName } from "@/lib/org";
 import type { WbsStatus } from "@/lib/wbsStatus";
 import { VARIANCE_TONE } from "@/lib/variance";
 
@@ -22,6 +24,8 @@ export default function OverviewView({
   status,
   tasks,
   signals,
+  track = [],
+  onCloseIssue,
   onAdd,
   onDone,
   onDefer,
@@ -33,6 +37,9 @@ export default function OverviewView({
   tasks: MyTask[];
   /** 지연·회신 지표. 이벤트 로그에서 계산해 넘어온다. */
   signals?: Map<string, TaskSignals>;
+  /** 쟁점·결정. 업무 목록과 섞지 않고 배지로만 노출한다. */
+  track?: TrackItem[];
+  onCloseIssue?: (id: string) => void;
   onAdd: (tasks: MyTask[]) => void;
   onDone: (id: string) => void;
   onDefer: (id: string) => void;
@@ -40,6 +47,8 @@ export default function OverviewView({
   onGoTree: () => void;
 }) {
   const [monthOpen, setMonthOpen] = useState(false);
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const issues = openIssues(track);
   const buckets = bucket(tasks, today, signals);
 
   return (
@@ -89,6 +98,34 @@ export default function OverviewView({
 
       {/* ── 2. 빠른 입력 ────────────────────────────────────── */}
       <QuickAdd today={today} onAdd={onAdd} />
+
+      {/* ── 미해결 쟁점 — 업무 목록과 섞지 않고 배지로만 ───────── */}
+      {issues.length > 0 && (
+        <section className="card month">
+          <button className="month__head" onClick={() => setIssuesOpen((open) => !open)} aria-expanded={issuesOpen}>
+            <span className="card__title">
+              미해결 쟁점 <span className="tag tag--warn">{issues.length}건</span>
+            </span>
+            <span className="month__toggle">{issuesOpen ? "접기" : "펼치기"}</span>
+          </button>
+          {issuesOpen && (
+            <div className="card__body stack">
+              {issues.map((issue) => (
+                <div key={issue.id} className="line">
+                  <p className="line__text">{issue.summary}</p>
+                  <p className="line__source">
+                    {issue.orgId && `${orgName(issue.orgId)} · `}{issue.origin} · {issue.at}
+                    {onCloseIssue && (
+                      <button className="btn btn--sm btn--ghost" onClick={() => onCloseIssue(issue.id)}>해결됨</button>
+                    )}
+                  </p>
+                  {issue.source && issue.source !== issue.summary && <p className="line__quote">{issue.source}</p>}
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
 
       {/* ── 3. 내가 해야 할 업무 ─────────────────────────────── */}
       <section className="buckets">

@@ -21,6 +21,7 @@ import type { MyTask } from "@/lib/mytask";
 import type { TaskEvent, TaskSignals } from "@/lib/history";
 import type { WbsStatus } from "@/lib/wbsStatus";
 import type { WbsTask } from "@/lib/types";
+import type { TrackItem } from "@/lib/track";
 
 type TabId = "daily" | "email" | "reminder" | "minutes" | "handover" | "weekly";
 
@@ -52,6 +53,7 @@ export default function AiView({
   department,
   onAdd,
   onRecord,
+  onTrack,
   notify,
 }: {
   today: string;
@@ -64,6 +66,7 @@ export default function AiView({
   department: string;
   onAdd: (tasks: MyTask[]) => void;
   onRecord: (event: TaskEvent) => void;
+  onTrack: (items: TrackItem[]) => void;
   notify: (message: string) => void;
 }) {
   const [tab, setTab] = useState<TabId>("daily");
@@ -202,7 +205,7 @@ export default function AiView({
           makeCall={call} onRecord={onRecord} onCopy={copy}
         />
       )}
-      {tab === "minutes" && <AiMinutes today={today} makeCall={call} onAdd={onAdd} onCopy={copy} />}
+      {tab === "minutes" && <AiMinutes today={today} makeCall={call} onAdd={onAdd} onTrack={onTrack} onCopy={copy} />}
       {tab === "handover" && (
         <AiHandover
           today={today} projectName={projectName} tasks={tasks} events={events}

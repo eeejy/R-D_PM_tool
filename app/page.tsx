@@ -11,6 +11,7 @@ import OrgView from "@/components/OrgView";
 import { todayISO } from "@/lib/date";
 import { makeId, type MyTask } from "@/lib/mytask";
 import { deriveAll, event as makeEvent, type TaskEvent } from "@/lib/history";
+import { closeIssue, openIssues, reopenIssue, type TrackItem } from "@/lib/track";
 import { summarize, type WbsStatus } from "@/lib/wbsStatus";
 import type { WbsFile } from "@/lib/parseFile";
 import type { RfpDocument } from "@/lib/rfp";
@@ -33,6 +34,7 @@ export default function App() {
   const [department, setDepartment] = useState("");
   const [tasks, setTasks] = useState<MyTask[]>([]);
   const [events, setEvents] = useState<TaskEvent[]>([]);
+  const [track, setTrack] = useState<TrackItem[]>([]);
   const [file, setFile] = useState<WbsFile | null>(null);
   const [fileName, setFileName] = useState("");
   const [rfp, setRfp] = useState<RfpDocument | null>(null);
@@ -51,6 +53,7 @@ export default function App() {
       setDepartment(saved.department ?? "");
       setTasks(saved.tasks);
       setEvents(saved.events ?? []);
+      setTrack(saved.track ?? []);
       setFileName(saved.wbsName ?? "");
       setRfp(saved.rfp ?? null);
     }
@@ -70,8 +73,8 @@ export default function App() {
 
   useEffect(() => {
     if (!hydrated) return;
-    store.save({ projectName, department, tasks, events, wbsName: fileName, rfp, updatedAt: "" });
-  }, [hydrated, projectName, department, tasks, events, fileName, rfp]);
+    store.save({ projectName, department, tasks, events, track, wbsName: fileName, rfp, updatedAt: "" });
+  }, [hydrated, projectName, department, tasks, events, track, fileName, rfp]);
 
   useEffect(() => {
     if (theme) document.documentElement.setAttribute("data-theme", theme);
@@ -158,6 +161,7 @@ export default function App() {
     setDepartment(restored.department ?? "");
     setTasks(restored.tasks);
     setEvents(restored.events ?? []);
+    setTrack(restored.track ?? []);
     notify("백업을 불러왔습니다");
   };
 
@@ -166,6 +170,7 @@ export default function App() {
     store.clear();
     setTasks([]);
     setEvents([]);
+    setTrack([]);
     setFile(null);
     setFileName("");
     setRfp(null);
@@ -173,6 +178,14 @@ export default function App() {
   };
 
   const openCount = tasks.filter((task) => task.status !== "완료").length;
+  const issueCount = openIssues(track).length;
+
+  /** 쟁점·결정은 덧붙이기만 한다. 닫아도 지우지 않는다 — 인수인계의 재료다. */
+  const addTrack = (items: TrackItem[]) => {
+    if (!items.length) return;
+    setTrack((current) => [...items, ...current]);
+    notify(`쟁점·결정 ${items.length}건 기록`);
+  };
 
   // 화면에 쓰는 지연·회신 지표는 전부 이벤트에서 계산한다. 저장하지 않는다.
   const signals = useMemo(
@@ -197,13 +210,14 @@ export default function App() {
               <span className="nav__icon" aria-hidden>{item.icon}</span>
               <span>{item.label}</span>
               {item.id === "tree" && openCount > 0 && <span className="nav__count">{openCount}</span>}
+              {item.id === "overview" && issueCount > 0 && <span className="nav__count">{issueCount}</span>}
             </button>
           ))}
         </nav>
 
         <div className="sidebar__foot">
           <input ref={importInput} type="file" hidden accept=".json" onChange={(event) => importBackup(event.target.files?.[0])} />
-          <button className="nav__item" onClick={() => store.exportWorkspace({ projectName, department, tasks, events, wbsName: fileName, rfp, updatedAt: "" })}>
+          <button className="nav__item" onClick={() => store.exportWorkspace({ projectName, department, tasks, events, track, wbsName: fileName, rfp, updatedAt: "" })}>
             <span className="nav__icon" aria-hidden>↓</span><span>내보내기</span>
           </button>
           <button className="nav__item" onClick={() => importInput.current?.click()}>
@@ -255,6 +269,8 @@ export default function App() {
             status={status}
             tasks={tasks}
             signals={signals}
+            track={track}
+            onCloseIssue={(id) => setTrack((current) => closeIssue(current, id, today))}
             onAdd={addTasks}
             onDone={markDone}
             onDefer={defer}
@@ -299,6 +315,7 @@ export default function App() {
             department={department}
             onAdd={addTasks}
             onRecord={record}
+            onTrack={addTrack}
             notify={notify}
           />
         )}

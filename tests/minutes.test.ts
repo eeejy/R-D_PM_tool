@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   actionsToDrafts,
   generateMinutes,
+  MAX_MINUTES_CHARS,
   MAX_SEGMENT_CHARS,
+  minutesTooLong,
   mergeMinutes,
   parseMeetingMeta,
   renderOnePager,
@@ -120,7 +122,7 @@ describe("응답 검증", () => {
   });
 
   it("일부 배열만 와도 받아들인다", () => {
-    expect(validateSegmentOutput({ decisions: [] })).toEqual({ issues: [], decisions: [], actions: [], requests: [] });
+    expect(validateSegmentOutput({ decisions: [] })).toEqual({ issues: [], decisions: [], actions: [], requests: [], items: [] });
   });
 
   it("항목이 문자열로 와도 살린다", () => {
@@ -352,5 +354,13 @@ describe("요청사항 → 업무 등록", () => {
   it("어느 발언에서 나왔는지 근거를 남긴다", () => {
     const [draft] = requestsToDrafts(requests, TODAY, "제3차 실무회의");
     expect(draft.note).toMatch(/제3차 실무회의 회의록 안건 2/);
+  });
+});
+
+describe("회의록 길이 가드", () => {
+  it("상한을 넘으면 알린다 — 자르지는 않는다", () => {
+    // 어디까지 넣을지는 사람이 정하는 게 맞다
+    expect(minutesTooLong("가".repeat(MAX_MINUTES_CHARS + 1))).toBe(true);
+    expect(minutesTooLong(MINUTES)).toBe(false);
   });
 });

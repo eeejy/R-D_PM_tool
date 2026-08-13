@@ -15,6 +15,7 @@
 
 import { capture, type Draft } from "./capture";
 import { classify } from "./worktree";
+import { toExtracted, type ExtractedItem } from "./track";
 import { isOrgId, matchOrg, ORG_BY_ID, type OrgId } from "./org";
 import { asText, asTextList, isRecord, oneLine, parseResponse, type LlmCall } from "./llm";
 import { parseCellDate } from "./text";
@@ -47,6 +48,18 @@ const MAX_HEADING_LENGTH = 60;
 
 /** 한 세그먼트가 이보다 길면 모델이 뒷부분을 흘린다. 문단 경계로 한 번 더 자른다. */
 export const MAX_SEGMENT_CHARS = 2500;
+
+/**
+ * 회의록 전체 길이 상한.
+ *
+ * 이보다 길면 안건 수가 수십 개로 늘어 호출이 몇 분씩 걸린다. 자르지 않고
+ * **화면에서 미리 알린다** — 어디까지 넣을지는 사람이 정하는 게 맞다.
+ */
+export const MAX_MINUTES_CHARS = 20_000;
+
+export function minutesTooLong(text: string): boolean {
+  return String(text ?? "").length > MAX_MINUTES_CHARS;
+}
 
 function isHeading(line: string): boolean {
   const trimmed = line.trim();
@@ -201,6 +214,9 @@ export const MINUTES_SYSTEM = [
   "- 원문에 없는 항목은 빈 배열로 둡니다. 억지로 채우지 않습니다.",
   "- 쟁점(issues)은 의견이 갈린 사안이고, 결정(decisions)은 확정된 사항이며, 후속조치(actions)는 누가 언제까지 할 일입니다.",
   "- 요청사항(requests)은 기관 사이에 오간 요청입니다. 우리가 요청한 것은 direction을 outgoing, 우리가 요청받은 것은 incoming으로 적습니다.",
+  "- items에는 요청·쟁점·결정을 한 배열에 담습니다. type은 request(내가 처리할 일) / issue(아직 결론이 안 난 사안) / decision(확정된 것) 중 하나입니다.",
+  "- items의 text에는 원문 문장을 그대로 옮깁니다. summary는 한 줄 요약입니다.",
+  "- 기한을 날짜로 못 바꾸면 dueDate를 비우고 dueRaw에 원문 표현(예: 다음 월간회의 전)을 적습니다.",
   "- 기관 이름은 원문에 적힌 그대로만 씁니다. 짐작해서 바꾸지 않습니다.",
   "- owner와 due는 원문에 있을 때만 채우고, 없으면 빈 문자열로 둡니다.",
   "- JSON만 출력합니다. 설명을 덧붙이지 않습니다.",
@@ -250,12 +266,17 @@ export type Issue = { topic: string; positions: string[]; sourceSegment: number 
 export type Decision = { text: string; sourceSegment: number };
 export type Action = { text: string; owner: string; due: string; sourceSegment: number };
 
+/** 검토 화면에 올릴 항목들. 요청·쟁점·결정이 한 배열에 담긴다. */
+export type SegmentExtract = ExtractedItem[];
+
 export type SegmentResult = {
   issues: Omit<Issue, "sourceSegment">[];
   decisions: Omit<Decision, "sourceSegment">[];
   actions: Omit<Action, "sourceSegment">[];
   /** 요청사항. 예전 형식으로 만든 결과도 받아들이려고 선택 항목으로 둔다. */
   requests?: Omit<MeetingRequest, "sourceSegment">[];
+  /** 검토 화면용 통합 목록(요청·쟁점·결정). 없으면 빈 배열. */
+  items?: SegmentExtract;
 };
 
 /**
@@ -328,6 +349,16 @@ export function validateSegmentOutput(value: unknown, source = ""): SegmentResul
     requests: toArray(value.requests)
       .map((entry) => toRequest(entry, source))
       .filter((entry): entry is Omit<MeetingRequest, "sourceSegment"> => entry !== null),
+
+    // 검토 화면용 통합 목록. 유형과 문장만 모델이 정하고 기관·날짜는 규칙이 정한다.
+    items: toArray(value.items)
+      .map((entry) => toExtracted(entry, {
+        segment: 0,
+        source,
+        orgOf: (text) => matchOrg(text).org.id,
+        dateOk: (iso, src) => !src || dateGroundedIn(iso, src),
+      }))
+      .filter((entry): entry is ExtractedItem => entry !== null),
   };
 }
 
@@ -385,6 +416,8 @@ export type MinutesReport = {
   decisions: Decision[];
   actions: Action[];
   requests: MeetingRequest[];
+  /** 검토 화면에 올릴 통합 목록(요청·쟁점·결정) */
+  items: ExtractedItem[];
   segments: Segment[];
   /** 모델이 실패한 안건 번호. 화면에 그대로 알려 준다 — 조용히 빠지는 게 가장 나쁘다. */
   failedSegments: number[];
@@ -396,7 +429,7 @@ export function mergeMinutes(
   segments: Segment[],
   results: (SegmentResult | null)[],
 ): MinutesReport {
-  const report: MinutesReport = { meeting: meta, issues: [], decisions: [], actions: [], requests: [], segments, failedSegments: [] };
+  const report: MinutesReport = { meeting: meta, issues: [], decisions: [], actions: [], requests: [], items: [], segments, failedSegments: [] };
 
   segments.forEach((segment, order) => {
     const result = results[order];
@@ -408,6 +441,7 @@ export function mergeMinutes(
     for (const decision of result.decisions) report.decisions.push({ ...decision, sourceSegment: segment.index });
     for (const action of result.actions) report.actions.push({ ...action, sourceSegment: segment.index });
     for (const request of result.requests ?? []) report.requests.push({ ...request, sourceSegment: segment.index });
+    for (const item of result.items ?? []) report.items.push({ ...item, sourceSegment: segment.index });
   });
 
   return report;

@@ -255,6 +255,20 @@ ollama pull qwen3:8b
 - **카테고리를 늘리지 않는다.** 모델이 새 분류를 만들지 못하게 스키마로 고정한다.
 - **LLM 문장과 규칙 문장을 구분해 표시한다.** 화면의 `LLM` / `규칙` 배지가 그것이다.
 
+### 안정성 가드
+
+| 가드 | 값 |
+|---|---|
+| 호출 제한 시간 | 60초 — 없으면 로딩이 영원히 안 풀린다 |
+| 입력 길이 | 24,000자 초과 시 자르고 **잘랐다고 알린다** |
+| 회의록 길이 | 20,000자 초과 시 화면에서 미리 안내 (자르지 않는다) |
+| 출력 상한 | 주간보고 1,500 · 인수인계 개요 800 · 주간계획 항목 700 토큰 |
+| 중복 클릭 | 생성 중에는 버튼이 잠긴다 |
+| 토큰 로깅 | 개발 중 콘솔에 입력·출력 토큰 수 |
+
+**조용히 자르지 않는 것이 핵심이다.** 뒷부분이 사라진 걸 모른 채 결과를 믿게 되는 것이
+이 앱이 계속 경계해 온 실패 방식이다.
+
 ### `num_ctx`가 이 작업의 1번 함정
 
 Ollama 기본값은 4096이다. 이대로 2만 자 회의록을 넣으면 **에러 없이** 앞부분만 읽고
@@ -475,6 +489,24 @@ few-shot 2개만 준다. 모델에 맡기면 라벨 조합이 매번 흔들린�
 빠른 입력부터 **날짜를 추측하지 않는다**는 규칙을 지켜 왔다. 근거 없는 날짜는 버리고
 기한 미정으로 남긴 뒤 사람이 채우게 한다(`dateGroundedIn`).
 
+#### 쟁점·결정은 업무와 섞지 않는다 (`lib/track.ts`)
+
+회의록에서 나오는 것이 전부 내 업무는 아니다. 셋이 섞여 있다.
+
+| 유형 | 어디로 |
+|---|---|
+| **요청**(request) | 내 업무로 등록 |
+| **쟁점**(issue) | **별도 트랙**에 미해결로 — 업무 목록에 넣지 않는다 |
+| **결정**(decision) | 결정 로그에 기록 (업무 아님) |
+
+쟁점을 업무 목록에 넣으면 "오늘 할 일"이 결론 안 난 논의로 채워진다. 체크할 수 없는
+항목이 쌓이면 목록 자체를 안 보게 된다. 개요에는 **`미해결 쟁점 N건` 배지**로만 노출하고
+펼치면 상세가 나온다. 쟁점을 닫아도 지우지 않는다 — 닫힌 쟁점도 인수인계의 재료다.
+
+**검토 단계를 반드시 거친다.** 추출 결과는 체크박스 목록으로 뜨고 **기본값은 전체 해제**다.
+근거 문장을 함께 보여줘서 취사선택이 가능하다. 자동 등록은 오탐이 섞여 한 번 신뢰를
+잃으면 그다음부터 아무도 안 쓴다.
+
 추출된 후속조치는 기존 빠른 입력(`lib/capture.ts`)을 통해 **업무로 바로 등록된다.**
 회의록 → 업무 자동 등록이 이 기능의 진짜 값어치다.
 
@@ -509,7 +541,7 @@ few-shot 2개만 준다. 모델에 맡기면 라벨 조합이 매번 흔들린�
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 409개 테스트
+npm test           # 427개 테스트
 npm run build
 ```
 
@@ -566,6 +598,7 @@ lib/           도메인 로직 — React를 import하지 않는다
   weeklyPlan.ts  주간업무계획 항목 서식 · 표시폭 검증 · 재생성 루프
   weeklyReport.ts 사업 주간보고 4요소 고정 양식
   llmContext.ts  요약 컨텍스트 · 토큰 상한
+  track.ts       쟁점·결정 트랙 (업무와 분리)
   capture.ts     한 줄 → 업무 1건 (기관·기한·상태 추출)
   mytask.ts      우선순위 점수 · 오늘/이번주/이번달 분류
   wbsStatus.ts   WBS 현재 상태 요약
@@ -585,7 +618,7 @@ components/    OverviewView · WorkTreeView · WbsView · RfpView · OrgView · 
                QuickAdd · TaskRow · BrandMark · PromptPeek
                AiDailyReport · AiEmail · AiMinutes
 app/           page.tsx (셸 + 상태) · globals.css (디자인 토큰)
-tests/         409개
+tests/         427개
 ```
 
 **원칙 1** — 시간에 의존하는 함수는 전부 `today`를 인자로 받는다(`capture`, `score`, `bucket`, `summarize`, `generateDailyReport`, `generateMinutes`). 그래야 "오늘 기준"이 테스트 가능해진다.
@@ -606,7 +639,8 @@ tests/orgPage.test.ts     28  기관별 집계 · 경과일 정렬 · 기본 선
 tests/reminder.test.ts    24  임계일 판정 · 단계 전이 · 경위 주입 · 발송 기록
 tests/handover.test.ts    25  6개 절 조립 · 개요만 LLM · 실패 시 나머지 보존
 tests/weeklyPlan.test.ts  50  표시폭 · 유형 9종 · 골격별 검증 · 업무 연결
-tests/weeklyReport.test.ts 27  주간 범위 · 입력 압축 · 4요소 골격 보장  분류 · 한 줄 캡처 · 여러 줄 등록
+tests/weeklyReport.test.ts 27  주간 범위 · 입력 압축 · 4요소 골격 보장
+tests/track.test.ts       14  추출 다듬기 · 쟁점 트랙 · 결정 로그  분류 · 한 줄 캡처 · 여러 줄 등록
 tests/mytask.test.ts      15  우선순위 점수 · 시간 분류
 tests/wbs.test.ts         10  헤더 매핑 · 실제 파일 회귀
 tests/wbsStatus.test.ts   10  진짜 엑셀 → 현재 상태 요약

@@ -89,6 +89,26 @@ export const ERROR_HINT: Record<LlmErrorKind, string> = {
  */
 export const DEFAULT_TIMEOUT_MS = 60_000;
 
+/**
+ * 입력 길이 상한(글자).
+ *
+ * 넘으면 자르고 **사용자에게 알린다.** 조용히 자르면 뒷부분이 사라진 걸 모른 채
+ * 결과를 믿게 된다 — 이 앱이 계속 경계해 온 실패 방식이다.
+ */
+export const MAX_PROMPT_CHARS = 24_000;
+
+export type Trimmed = { text: string; trimmed: boolean; dropped: number };
+
+export function trimPrompt(prompt: string, limit = MAX_PROMPT_CHARS): Trimmed {
+  const text = String(prompt ?? "");
+  if (text.length <= limit) return { text, trimmed: false, dropped: 0 };
+  return {
+    text: `${text.slice(0, limit)}\n\n※ 입력이 길어 이후 내용을 잘랐습니다.`,
+    trimmed: true,
+    dropped: text.length - limit,
+  };
+}
+
 /** 브라우저가 보안 출처로 취급하는 로컬 주소. Ollama가 기본으로 허용하는 범위이기도 하다. */
 export function isLocalOrigin(origin: string): boolean {
   return /^https?:\/\/(localhost|127\.0\.0\.1|\[::1\])(:\d+)?\/?$/i.test(String(origin ?? "").trim());
@@ -199,7 +219,12 @@ export async function complete(
 ): Promise<string> {
   const config = { ...DEFAULT_LLM_CONFIG, ...options.config };
   const doFetch = options.fetchImpl ?? fetch;
-  const body = buildRequest(prompt, options);
+  // 입력이 너무 길면 자르고 그 사실을 남긴다
+  const { text: safePrompt, trimmed, dropped } = trimPrompt(prompt);
+  if (trimmed && process.env.NODE_ENV !== "production") {
+    console.warn(`[llm] 입력이 길어 ${dropped.toLocaleString()}자를 잘랐습니다`);
+  }
+  const body = buildRequest(safePrompt, options);
 
   // 사용자 중단과 제한 시간을 하나의 신호로 합친다. AbortSignal.any는 아직 못 쓰는
   // 브라우저가 있어 직접 엮는다.
@@ -240,9 +265,16 @@ export async function complete(
     throw new LlmError("http", `Ollama가 오류를 돌려줬습니다 (${response.status}).`, ERROR_HINT.http, detail);
   }
 
-  const payload = (await response.json().catch(() => null)) as { response?: string } | null;
+  const payload = (await response.json().catch(() => null)) as
+    { response?: string; prompt_eval_count?: number; eval_count?: number } | null;
   if (!payload || typeof payload.response !== "string") {
     throw new LlmError("parse", "Ollama 응답 형식을 읽지 못했습니다.", ERROR_HINT.parse);
+  }
+  // 개발 중 토큰 사용량을 남긴다. 어느 기능이 비싼지 눈으로 보여야 줄일 수 있다.
+  if (process.env.NODE_ENV !== "production" && payload.prompt_eval_count != null) {
+    console.debug(
+      `[llm] ${config.model} 입력 ${payload.prompt_eval_count} / 출력 ${payload.eval_count ?? 0} 토큰`,
+    );
   }
   return payload.response;
 }

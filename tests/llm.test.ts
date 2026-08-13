@@ -9,6 +9,8 @@ import {
   DEFAULT_LLM_CONFIG,
   connectionHint,
   DEFAULT_TIMEOUT_MS,
+  MAX_PROMPT_CHARS,
+  trimPrompt,
   isLocalOrigin,
 } from "../lib/llm";
 
@@ -223,5 +225,31 @@ describe("제한 시간", () => {
 
   it("기본 제한 시간이 정해져 있다", () => {
     expect(DEFAULT_TIMEOUT_MS).toBeGreaterThan(0);
+  });
+});
+
+describe("입력 길이 가드", () => {
+  it("상한 안이면 그대로 둔다", () => {
+    expect(trimPrompt("짧은 입력")).toEqual({ text: "짧은 입력", trimmed: false, dropped: 0 });
+  });
+
+  it("넘으면 자르고 잘랐다고 남긴다", () => {
+    // 조용히 자르면 뒷부분이 사라진 걸 모른 채 결과를 믿게 된다
+    const long = "가".repeat(MAX_PROMPT_CHARS + 500);
+    const result = trimPrompt(long);
+    expect(result.trimmed).toBe(true);
+    expect(result.dropped).toBe(500);
+    expect(result.text).toMatch(/이후 내용을 잘랐습니다/);
+  });
+
+  it("실제 호출에서도 잘라 보낸다", async () => {
+    let sent = "";
+    const spy = (async (_url: string, init: RequestInit) => {
+      sent = JSON.parse(String(init.body)).prompt;
+      return { ok: true, status: 200, json: async () => ({ response: "ok" }), text: async () => "" } as unknown as Response;
+    }) as unknown as typeof fetch;
+
+    await complete("나".repeat(MAX_PROMPT_CHARS + 1000), { fetchImpl: spy });
+    expect(sent.length).toBeLessThan(MAX_PROMPT_CHARS + 100);
   });
 });
