@@ -102,7 +102,7 @@ Ollama 없이 실행해도 앱은 정상 동작합니다(보고 생성은 규칙
 ### 테스트
 
 ```bash
-npm test        # 316개 (기존 86개 + 신규 230개)
+npm test        # 326개 (기존 86개 + 신규 240개)
 ```
 
 LLM이 생성한 **문장 자체는 테스트하지 않습니다.** 매번 달라지므로 대상이 될 수 없습니다.
@@ -133,7 +133,7 @@ LLM이 생성한 **문장 자체는 테스트하지 않습니다.** 매번 달�
 │   ├── AiDailyReport.tsx / AiEmail.tsx / AiMinutes.tsx
 │   └── PromptPeek.tsx       모델에 들어가는 원문 미리보기
 ├── app/                   page.tsx (셸 + 상태) · globals.css (디자인 토큰)
-└── tests/                 316개
+└── tests/                 326개
 ```
 
 상세한 설계 근거와 판단 기록은 **`README.md`** 에 있습니다.
