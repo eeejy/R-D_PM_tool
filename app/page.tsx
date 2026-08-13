@@ -6,6 +6,7 @@ import OverviewView from "@/components/OverviewView";
 import WorkTreeView from "@/components/WorkTreeView";
 import WbsView from "@/components/WbsView";
 import RfpView from "@/components/RfpView";
+import AiView from "@/components/AiView";
 import { todayISO } from "@/lib/date";
 import { makeId, type MyTask } from "@/lib/mytask";
 import { summarize, type WbsStatus } from "@/lib/wbsStatus";
@@ -13,13 +14,14 @@ import type { WbsFile } from "@/lib/parseFile";
 import type { RfpDocument } from "@/lib/rfp";
 import * as store from "@/lib/store";
 
-type ViewId = "overview" | "tree" | "wbs" | "rfp";
+type ViewId = "overview" | "tree" | "wbs" | "rfp" | "ai";
 
 const NAV: { id: ViewId; label: string; icon: string }[] = [
   { id: "overview", label: "개요", icon: "◱" },
   { id: "tree", label: "업무트리", icon: "☰" },
   { id: "wbs", label: "연구개발 현황", icon: "▤" },
   { id: "rfp", label: "RFP 검색", icon: "⌕" },
+  { id: "ai", label: "보고 생성", icon: "✎" },
 ];
 
 export default function App() {
@@ -55,7 +57,7 @@ export default function App() {
     const requested = params.get("view");
     if (q) setRfpQuery(q);
     if (requested === "rfp" || q) setView("rfp");
-    else if (requested === "tree" || requested === "wbs" || requested === "overview") setView(requested);
+    else if (requested === "tree" || requested === "wbs" || requested === "overview" || requested === "ai") setView(requested);
     const storedTheme = window.localStorage.getItem("rnd-flow:theme");
     if (storedTheme === "light" || storedTheme === "dark") setTheme(storedTheme);
     setHydrated(true);
@@ -228,6 +230,16 @@ export default function App() {
         )}
         {view === "wbs" && (
           <WbsView status={status} file={file} fileName={fileName} onLoad={loadWbs} />
+        )}
+        {view === "ai" && (
+          <AiView
+            today={today}
+            tasks={tasks}
+            projectName={projectName}
+            department={department}
+            onAdd={addTasks}
+            notify={notify}
+          />
         )}
         {view === "rfp" && (
           <RfpView

@@ -1,5 +1,6 @@
 import { daysBetween, formatKoreanDate } from "./text";
 import type { CategoryId } from "./worktree";
+import type { OrgId } from "./org";
 
 /**
  * 사업담당자가 직접 처리하는 업무 한 건.
@@ -11,8 +12,13 @@ export type MyTask = {
   id: string;
   title: string;
   categoryId: CategoryId;
-  /** 대상 기관·담당자. 없으면 빈 문자열 */
+  /** 대상 기관·담당자 표기. 기관 마스터에 걸리면 정규 표기명이 들어간다. */
   org: string;
+  /**
+   * 기관 마스터 11개 중 하나. 집계는 이 값으로만 한다 —
+   * `org` 문자열로 세면 "㈜지엠티"와 "지엠티"가 다른 기관이 된다.
+   */
+  orgId?: OrgId;
   /** ISO yyyy-mm-dd. 문장에서 못 찾으면 빈 문자열 */
   due: string;
   /** "다음 월간회의 이전"처럼 날짜로 못 바꾼 기한 표현 */
