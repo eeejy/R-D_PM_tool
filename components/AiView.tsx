@@ -6,7 +6,7 @@ import AiEmail from "./AiEmail";
 import AiMinutes from "./AiMinutes";
 import AiReminder from "./AiReminder";
 import AiHandover from "./AiHandover";
-import AiWeeklyPlan from "./AiWeeklyPlan";
+import AiWeekly from "./AiWeekly";
 import {
   checkOllama,
   connectionHint,
@@ -19,6 +19,8 @@ import {
 } from "@/lib/llm";
 import type { MyTask } from "@/lib/mytask";
 import type { TaskEvent, TaskSignals } from "@/lib/history";
+import type { WbsStatus } from "@/lib/wbsStatus";
+import type { WbsTask } from "@/lib/types";
 
 type TabId = "daily" | "email" | "reminder" | "minutes" | "handover" | "weekly";
 
@@ -28,7 +30,7 @@ const TABS: { id: TabId; label: string; sub: string }[] = [
   { id: "reminder", label: "재촉", sub: "회신 임계일을 넘긴 요청" },
   { id: "minutes", label: "회의록", sub: "쟁점·결정·후속조치와 1페이지 보고서" },
   { id: "handover", label: "인수인계", sub: "왜 이 상태인지를 남기는 문서" },
-  { id: "weekly", label: "주간업무계획", sub: "개조식 서식 · 분량 검증까지" },
+  { id: "weekly", label: "주간업무계획", sub: "사업 주간보고 · 항목 단위" },
 ];
 
 /**
@@ -44,6 +46,8 @@ export default function AiView({
   tasks,
   signals,
   events,
+  status,
+  wbsTasks,
   projectName,
   department,
   onAdd,
@@ -54,6 +58,8 @@ export default function AiView({
   tasks: MyTask[];
   signals?: Map<string, TaskSignals>;
   events: TaskEvent[];
+  status: WbsStatus | null;
+  wbsTasks: WbsTask[];
   projectName: string;
   department: string;
   onAdd: (tasks: MyTask[]) => void;
@@ -201,9 +207,10 @@ export default function AiView({
         <AiHandover today={today} tasks={tasks} events={events} makeCall={call} onCopy={copy} />
       )}
       {tab === "weekly" && (
-        <AiWeeklyPlan
-          today={today} tasks={tasks} events={events}
-          department={department} llmReady={connected} onCopy={copy}
+        <AiWeekly
+          today={today} projectName={projectName} department={department}
+          tasks={tasks} events={events} status={status} wbsTasks={wbsTasks}
+          llmReady={connected} onCopy={copy}
         />
       )}
     </div>

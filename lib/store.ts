@@ -66,6 +66,11 @@ export function clear(): void {
   window.localStorage.removeItem(KEY);
 }
 
+/** 텍스트 파일로 내려받기. 보고서·인수인계서처럼 문서로 남기는 결과물에 쓴다. */
+export function downloadText(content: string, fileName: string): void {
+  download(content, fileName, "text/plain;charset=utf-8");
+}
+
 function download(content: string, fileName: string, mime: string): void {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);

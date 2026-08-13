@@ -293,6 +293,8 @@ export default function App() {
             tasks={tasks}
             signals={signals}
             events={events}
+            status={status}
+            wbsTasks={file?.tasks ?? []}
             projectName={projectName}
             department={department}
             onAdd={addTasks}

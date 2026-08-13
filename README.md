@@ -291,7 +291,42 @@ Ollama 기본값은 4096이다. 이대로 2만 자 회의록을 넣으면 **에�
 few-shot 예시(`DEFAULT_EMAIL_EXAMPLES`)를 **실제로 보냈던 메일 3통으로 갈아끼우면**
 공문체 품질이 눈에 띄게 오른다. 8B 모델의 어색한 문장은 대부분 예시로 해결된다.
 
-### 주간업무계획 (`lib/weeklyPlan.ts`)
+### 사업 주간보고서 (`lib/weeklyReport.ts`, `lib/llmContext.ts`)
+
+주간 산출물이 둘이다. **용도가 다르다** — 이건 사업 단위로 한 주를 정리한 **문서 한 장**이고,
+아래 주간업무계획은 청 문서에 낄 **항목 한 건**이다. 서식도 분량 규칙도 달라 나눠 뒀다.
+
+```
+[CDX 연구개발사업] 주간업무계획 (2026.08.10 ~ 08.16)
+
+□ 추진배경
+  ○ …
+□ 주요내용
+  ○ …
+□ 향후계획
+  ○ …
+
+※ 생성된 초안입니다. 숫자·기관명은 반드시 확인하세요.
+```
+
+**골격은 코드가 만든다.** 타이틀·섹션 헤더·말미 안내문은 고정 문자열이고, LLM은 각
+섹션의 `○` 항목 내용만 만든다. 그래서 **모델이 죽어도 네 요소가 절대 빠지지 않는다.**
+데이터가 없는 섹션은 지우지 않고 `○ 해당 없음`으로, 생성이 실패하면
+`○ (생성 실패 — 직접 작성)`으로 채운다. 섹션이 사라지는 경로가 없다.
+
+**원본을 통째로 넣지 않는다.** `llmContext.ts`가 요약본만 만든다(상한 3,000토큰).
+
+| 넣는 것 | 빼는 것 |
+|---|---|
+| 사업 기본정보 · 주간 범위 | WBS 전체 행 |
+| WBS 집계 숫자 · 기관별 진척 | RFP 원문 |
+| 지연 상위 10건 · 주의 상위 5건 | 완료된 과업·업무 |
+| 이번 주 / 다음 주 업무 · 미해결 쟁점 · 마일스톤 3건 | 한 달 밖 일정 |
+
+상한을 넘으면 **줄 단위로** 자르고 잘렸다고 남긴다 — 문장 중간에서 끊으면 모델이 잘린
+조각을 사실로 읽는다. 빈 절도 `해당 없음`으로 남긴다. 없다는 사실을 알아야 지어내지 않는다.
+
+### 주간업무계획 — 항목 단위 (`lib/weeklyPlan.ts`)
 
 다른 기능과 성격이 다르다. **여기서는 분량 자체가 형식이다.** 해양경찰청 주간업무계획
 3개 호(업무계획 117건)의 한글 파일 줄배치 캐시를 실측해 만든 예산이라, 넘기면 목록
@@ -463,7 +498,7 @@ few-shot 2개만 준다. 모델에 맡기면 라벨 조합이 매번 흔들린�
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 376개 테스트
+npm test           # 407개 테스트
 npm run build
 ```
 
@@ -517,7 +552,9 @@ lib/           도메인 로직 — React를 import하지 않는다
   orgPage.ts     기관별 원페이지 집계 · 요약 문단
   reminder.ts    재촉 판정 · 단계별 문체 · 경위 주입
   handover.ts    인수인계 섹션 선별 · 경위 사실 조립
-  weeklyPlan.ts  주간업무계획 서식 · 표시폭 검증 · 재생성 루프
+  weeklyPlan.ts  주간업무계획 항목 서식 · 표시폭 검증 · 재생성 루프
+  weeklyReport.ts 사업 주간보고 4요소 고정 양식
+  llmContext.ts  요약 컨텍스트 · 토큰 상한
   capture.ts     한 줄 → 업무 1건 (기관·기한·상태 추출)
   mytask.ts      우선순위 점수 · 오늘/이번주/이번달 분류
   wbsStatus.ts   WBS 현재 상태 요약
@@ -537,7 +574,7 @@ components/    OverviewView · WorkTreeView · WbsView · RfpView · OrgView · 
                QuickAdd · TaskRow · BrandMark · PromptPeek
                AiDailyReport · AiEmail · AiMinutes
 app/           page.tsx (셸 + 상태) · globals.css (디자인 토큰)
-tests/         376개
+tests/         407개
 ```
 
 **원칙 1** — 시간에 의존하는 함수는 전부 `today`를 인자로 받는다(`capture`, `score`, `bucket`, `summarize`, `generateDailyReport`, `generateMinutes`). 그래야 "오늘 기준"이 테스트 가능해진다.
@@ -557,7 +594,8 @@ tests/history.test.ts     27  영업일 · 파생 지표 · 리마인드 판정 
 tests/orgPage.test.ts     22  기관별 집계 · 미결 요청 · 요약 입력 범위
 tests/reminder.test.ts    24  임계일 판정 · 단계 전이 · 경위 주입 · 발송 기록
 tests/handover.test.ts    29  섹션 선별 · 경위 사실 · 사유 미기재 · 기관 표
-tests/weeklyPlan.test.ts  50  표시폭 · 유형 9종 · 골격별 검증 · 업무 연결  분류 · 한 줄 캡처 · 여러 줄 등록
+tests/weeklyPlan.test.ts  50  표시폭 · 유형 9종 · 골격별 검증 · 업무 연결
+tests/weeklyReport.test.ts 27  주간 범위 · 입력 압축 · 4요소 골격 보장  분류 · 한 줄 캡처 · 여러 줄 등록
 tests/mytask.test.ts      15  우선순위 점수 · 시간 분류
 tests/wbs.test.ts         10  헤더 매핑 · 실제 파일 회귀
 tests/wbsStatus.test.ts   10  진짜 엑셀 → 현재 상태 요약
