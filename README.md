@@ -63,6 +63,40 @@ A기관에 데이터 3종 아직 안 왔음. 금요일까지 다시 확인
 
 각 영역에는 담당자가 늘 챙기는 **상시 점검 항목**이 체크리스트로 붙어 있고, 실제 등록한 업무만 개요의 오늘/이번 주에 올라간다.
 
+### 기관 마스터 11개 (`lib/org.ts`)
+
+카테고리와 같은 이유로 **기관도 11개에서 늘리지 않는다.** 자유 입력을 허용하면 "지엠티",
+"㈜지엠티", "GMT"가 각각 다른 기관으로 쌓여 기관별 집계가 조용히 무너진다.
+
+| 기관 | 역할 |
+|---|---|
+| 지엠티 | 주관연구기관 |
+| 유원GIS · 세명소프트 · 그린블루 · 엑셈 · MIT · 동국대 · T3Q · 써로마인드 | 공동연구기관 |
+| KIMST | 전문기관 |
+| 기타 / 미분류 | 폴백 |
+
+2~9번은 통합 WBS의 기관별 시트명에서 그대로 가져와 **상수로 고정했다.** 매번 파일에서
+읽지 않는다 — 파일이 바뀌면 기관이 조용히 늘어나기 때문이다. 실제 WBS(226개 항목)를
+파서에 통과시켰을 때 뽑히는 기관 9개가 마스터와 정확히 일치한다.
+
+```
+입력 문장
+  → 별칭 일치(공백·㈜·괄호 제거 후)  → 해당 기관
+  → 후보 2곳 이상                    → '기타'로 보내고 후보를 함께 표시
+  → 미매칭                           → '기타'
+```
+
+**후보가 둘이면 고르지 않는다.** 반반 확률로 찍는 것보다 사람이 고치게 하는 편이 낫다.
+
+**영문 약칭에는 단어 경계를 요구한다.** `MIT`를 부분일치로 잡으면 `submit`·`limit`에
+걸려 엉뚱한 기관이 붙는다. 한글 별칭은 부분일치로 충분하다.
+
+기관별 회신 임계일도 여기 둔다(주관 3 · 공동 5 · 전문 7영업일). 회신 대기가 얼마나
+지났는지 판정할 때 쓴다.
+
+빠른 입력의 대상기관은 **선택 목록**이다. 자유 입력 칸을 두지 않았고, 화면에서 기관을
+추가하는 UI도 만들지 않는다 — 기관 추가는 코드 수정 사항으로 둔다.
+
 ## 3. 우선순위 자동화 (`lib/mytask.ts`)
 
 사용자가 매긴 우선순위만 믿으면 결국 전부 '높음'이 된다. 그래서 사실에서 점수를 만들고, **그 근거를 화면에 그대로 띄운다.**
@@ -236,7 +270,7 @@ few-shot 예시(`DEFAULT_EMAIL_EXAMPLES`)를 **실제로 보냈던 메일 3통�
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 196개 테스트
+npm test           # 214개 테스트
 npm run build
 ```
 
@@ -285,6 +319,7 @@ OLLAMA_ORIGINS="https://<배포주소>" ollama serve
 ```
 lib/           도메인 로직 — React를 import하지 않는다
   worktree.ts    8개 업무 영역 정의 · 자연어 분류
+  org.ts         기관 마스터 11개 · 별칭 매칭 · 회신 임계일
   capture.ts     한 줄 → 업무 1건 (기관·기한·상태 추출)
   mytask.ts      우선순위 점수 · 오늘/이번주/이번달 분류
   wbsStatus.ts   WBS 현재 상태 요약
@@ -304,7 +339,7 @@ components/    OverviewView · WorkTreeView · WbsView · RfpView · AiView
                QuickAdd · TaskRow · BrandMark · PromptPeek
                AiDailyReport · AiEmail · AiMinutes
 app/           page.tsx (셸 + 상태) · globals.css (디자인 토큰)
-tests/         196개
+tests/         214개
 ```
 
 **원칙 1** — 시간에 의존하는 함수는 전부 `today`를 인자로 받는다(`capture`, `score`, `bucket`, `summarize`, `generateDailyReport`, `generateMinutes`). 그래야 "오늘 기준"이 테스트 가능해진다.
@@ -318,7 +353,8 @@ tests/         196개
 ## 테스트
 
 ```
-tests/worktree.test.ts    14  분류 · 한 줄 캡처 · 여러 줄 등록
+tests/worktree.test.ts    14
+tests/org.test.ts         18  기관 마스터 · 별칭 매칭 · 후보 중복 · 빠른 입력 연결  분류 · 한 줄 캡처 · 여러 줄 등록
 tests/mytask.test.ts      15  우선순위 점수 · 시간 분류
 tests/wbs.test.ts         10  헤더 매핑 · 실제 파일 회귀
 tests/wbsStatus.test.ts   10  진짜 엑셀 → 현재 상태 요약

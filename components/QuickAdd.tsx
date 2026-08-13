@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { capture, captureMany, type Draft } from "@/lib/capture";
 import { CATEGORIES, categoryTitle } from "@/lib/worktree";
+import { ORGS, orgName } from "@/lib/org";
 import type { MyTask } from "@/lib/mytask";
 
 /**
@@ -66,11 +67,26 @@ export default function QuickAdd({ today, onAdd }: { today: string; onAdd: (task
           </label>
           <label className="field">
             <span>대상기관</span>
-            <input
-              className="input" value={draft.org}
-              onChange={(event) => setEdit((current) => ({ ...current, org: event.target.value }))}
-              placeholder="미지정"
-            />
+            {/* 자유 입력을 막는다 — 표기가 갈리면 기관별 집계가 조용히 무너진다 */}
+            <select
+              className="select"
+              value={draft.orgId ?? "etc"}
+              onChange={(event) => {
+                const orgId = event.target.value as Draft["orgId"];
+                setEdit((current) => ({
+                  ...current,
+                  orgId,
+                  org: orgId === "etc" ? "" : orgName(orgId),
+                }));
+              }}
+            >
+              {ORGS.map((org) => (
+                <option key={org.id} value={org.id}>
+                  {org.id === "etc" ? org.name : `${org.name} (${org.role})`}
+                </option>
+              ))}
+            </select>
+            {draft.orgId === "etc" && draft.org && <small>{draft.org} — 마스터에 없는 표기입니다</small>}
           </label>
           <label className="field">
             <span>기한</span>

@@ -1,5 +1,6 @@
 import { extractOwner, parseDeadline, toTitle } from "./nlp";
 import { makeId, type MyTask } from "./mytask";
+import { matchOrg } from "./org";
 import { classify, matchItem } from "./worktree";
 
 /**
@@ -36,7 +37,12 @@ export type Draft = Omit<MyTask, "id" | "createdAt"> & { id: string; createdAt: 
 export function capture(text: string, today: string): Draft {
   const clean = text.trim();
   const category = classify(clean);
-  const org = extractOwner(clean);
+
+  // 기관 마스터에 걸리면 정규 표기명으로 바꾼다. "㈜지엠티"와 "지엠티"가 다른
+  // 기관으로 쌓이면 기관별 집계가 무너지기 때문이다. 마스터에 없는 표기는
+  // 기존 추출기가 뽑은 문자열을 그대로 두되, 집계에서는 '기타'로 모인다.
+  const matched = matchOrg(clean);
+  const org = matched.org.id === "etc" ? extractOwner(clean) : matched.org.name;
   const relative = RELATIVE_DEADLINES.find((rule) => rule.pattern.test(clean));
   const due = parseDeadline(clean, today);
 
@@ -48,6 +54,7 @@ export function capture(text: string, today: string): Draft {
     title,
     categoryId: category.id,
     org: org === "내 업무" ? "" : org,
+    orgId: matched.org.id,
     // 상대 표현이 있으면 날짜를 억지로 만들지 않고 표현을 남긴다.
     due: relative ? "" : due,
     dueNote: relative?.label ?? "",
