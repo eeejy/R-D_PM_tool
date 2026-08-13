@@ -21,6 +21,10 @@ export type LlmConfig = {
   numCtx: number;
   /** 사실 추출 작업이므로 낮게 둔다. */
   temperature: number;
+  /** 반복 억제. 행정문서처럼 형식이 반복되는 글에서 같은 구절이 되풀이되는 걸 막는다. */
+  repeatPenalty?: number;
+  /** 생성 길이 상한. 길이가 규정된 문서를 만들 때만 정한다. */
+  numPredict?: number;
   /**
    * 사고 과정 출력. qwen3처럼 thinking을 지원하는 모델만 받는다.
    * 값을 정하지 않으면 요청에 넣지 않는다 — 지원하지 않는 모델은 400을 돌려주기 때문이다.
@@ -96,8 +100,9 @@ export type LlmRequest = {
   prompt: string;
   system?: string;
   stream: false;
-  format: "json" | object;
-  options: { num_ctx: number; temperature: number };
+  /** "text"를 고르면 이 필드를 아예 싣지 않는다 — 자유 형식 출력을 받을 때다. */
+  format?: "json" | object;
+  options: { num_ctx: number; temperature: number; repeat_penalty?: number; num_predict?: number };
   think?: boolean;
 };
 
@@ -107,19 +112,23 @@ export type LlmRequest = {
  */
 export function buildRequest(
   prompt: string,
-  options: { system?: string; config?: Partial<LlmConfig>; format?: "json" | object } = {},
+  options: { system?: string; config?: Partial<LlmConfig>; format?: "json" | "text" | object } = {},
 ): LlmRequest {
   const config = { ...DEFAULT_LLM_CONFIG, ...options.config };
+  const format = options.format ?? "json";
   const request: LlmRequest = {
     model: config.model,
     prompt,
     stream: false,
-    format: options.format ?? "json",
     options: {
       num_ctx: Math.max(4096, Math.round(config.numCtx)),
       temperature: config.temperature,
     },
   };
+  // JSON을 강제하지 않는 경우도 있다 — 정해진 서식의 평문을 받을 때다.
+  if (format !== "text") request.format = format;
+  if (config.repeatPenalty != null) request.options.repeat_penalty = config.repeatPenalty;
+  if (config.numPredict != null) request.options.num_predict = config.numPredict;
   if (options.system) request.system = options.system;
   if (typeof config.think === "boolean") request.think = config.think;
   return request;
@@ -169,7 +178,7 @@ export async function complete(
   options: {
     system?: string;
     config?: Partial<LlmConfig>;
-    format?: "json" | object;
+    format?: "json" | "text" | object;
     signal?: AbortSignal;
     fetchImpl?: typeof fetch;
   } = {},
@@ -216,6 +225,18 @@ export async function completeJson<T>(
 
 /** 기능 모듈이 주입받는 호출 함수 타입. 테스트에서는 가짜를 넣는다. */
 export type LlmCall = (prompt: string, system?: string) => Promise<string>;
+
+/**
+ * 정해진 서식의 평문을 받는 호출. JSON을 강제하지 않는다.
+ *
+ * 주간업무계획처럼 결과물 자체가 서식인 문서는 JSON으로 감싸면 오히려 형식이 무너진다.
+ */
+export function makeTextCall(
+  config: Partial<LlmConfig>,
+  options: { signal?: AbortSignal; fetchImpl?: typeof fetch } = {},
+): LlmCall {
+  return (prompt, system) => complete(prompt, { ...options, config, system, format: "text" });
+}
 
 /** 설정으로 고정한 호출 함수를 만든다. */
 export function makeCall(

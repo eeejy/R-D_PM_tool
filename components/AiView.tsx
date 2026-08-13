@@ -6,6 +6,7 @@ import AiEmail from "./AiEmail";
 import AiMinutes from "./AiMinutes";
 import AiReminder from "./AiReminder";
 import AiHandover from "./AiHandover";
+import AiWeeklyPlan from "./AiWeeklyPlan";
 import {
   checkOllama,
   connectionHint,
@@ -19,7 +20,7 @@ import {
 import type { MyTask } from "@/lib/mytask";
 import type { TaskEvent, TaskSignals } from "@/lib/history";
 
-type TabId = "daily" | "email" | "reminder" | "minutes" | "handover";
+type TabId = "daily" | "email" | "reminder" | "minutes" | "handover" | "weekly";
 
 const TABS: { id: TabId; label: string; sub: string }[] = [
   { id: "daily", label: "일일 업무보고", sub: "오늘 보고할 것을 골라 문장으로" },
@@ -27,6 +28,7 @@ const TABS: { id: TabId; label: string; sub: string }[] = [
   { id: "reminder", label: "재촉", sub: "회신 임계일을 넘긴 요청" },
   { id: "minutes", label: "회의록", sub: "쟁점·결정·후속조치와 1페이지 보고서" },
   { id: "handover", label: "인수인계", sub: "왜 이 상태인지를 남기는 문서" },
+  { id: "weekly", label: "주간업무계획", sub: "개조식 서식 · 분량 검증까지" },
 ];
 
 /**
@@ -198,6 +200,7 @@ export default function AiView({
       {tab === "handover" && (
         <AiHandover today={today} tasks={tasks} events={events} makeCall={call} onCopy={copy} />
       )}
+      {tab === "weekly" && <AiWeeklyPlan llmReady={connected} onCopy={copy} />}
     </div>
   );
 }
