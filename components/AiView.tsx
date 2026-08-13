@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import AiDailyReport from "./AiDailyReport";
 import AiEmail from "./AiEmail";
 import AiMinutes from "./AiMinutes";
+import AiReminder from "./AiReminder";
 import {
   checkOllama,
   connectionHint,
@@ -15,13 +16,14 @@ import {
   type LlmConfig,
 } from "@/lib/llm";
 import type { MyTask } from "@/lib/mytask";
-import type { TaskSignals } from "@/lib/history";
+import type { TaskEvent, TaskSignals } from "@/lib/history";
 
-type TabId = "daily" | "email" | "minutes";
+type TabId = "daily" | "email" | "reminder" | "minutes";
 
 const TABS: { id: TabId; label: string; sub: string }[] = [
   { id: "daily", label: "일일 업무보고", sub: "오늘 보고할 것을 골라 문장으로" },
   { id: "email", label: "이메일 초안", sub: "요청사항을 발송용 메일로" },
+  { id: "reminder", label: "재촉", sub: "회신 임계일을 넘긴 요청" },
   { id: "minutes", label: "회의록", sub: "쟁점·결정·후속조치와 1페이지 보고서" },
 ];
 
@@ -37,17 +39,21 @@ export default function AiView({
   today,
   tasks,
   signals,
+  events,
   projectName,
   department,
   onAdd,
+  onRecord,
   notify,
 }: {
   today: string;
   tasks: MyTask[];
   signals?: Map<string, TaskSignals>;
+  events: TaskEvent[];
   projectName: string;
   department: string;
   onAdd: (tasks: MyTask[]) => void;
+  onRecord: (event: TaskEvent) => void;
   notify: (message: string) => void;
 }) {
   const [tab, setTab] = useState<TabId>("daily");
@@ -178,6 +184,13 @@ export default function AiView({
       {tab === "daily" && <AiDailyReport today={today} tasks={tasks} signals={signals} makeCall={call} onCopy={copy} />}
       {tab === "email" && (
         <AiEmail today={today} tasks={tasks} projectName={projectName} department={department} makeCall={call} onCopy={copy} />
+      )}
+      {tab === "reminder" && (
+        <AiReminder
+          today={today} tasks={tasks} events={events}
+          projectName={projectName} department={department}
+          makeCall={call} onRecord={onRecord} onCopy={copy}
+        />
       )}
       {tab === "minutes" && <AiMinutes today={today} makeCall={call} onAdd={onAdd} onCopy={copy} />}
     </div>

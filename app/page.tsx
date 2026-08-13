@@ -292,9 +292,11 @@ export default function App() {
             today={today}
             tasks={tasks}
             signals={signals}
+            events={events}
             projectName={projectName}
             department={department}
             onAdd={addTasks}
+            onRecord={record}
             notify={notify}
           />
         )}
