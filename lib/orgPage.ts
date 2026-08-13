@@ -29,9 +29,14 @@ export type OpenRequest = {
   sentAt: string;
   waitingDays: number | null;
   dueLabel: string;
-  /** 임계일을 넘겼는가 */
+  /** 기관별 임계일을 넘겼는가 */
   overdue: boolean;
+  /** 오래 방치된 건. 임계일과 별개로 화면에서 붉게 표시한다. */
+  stale: boolean;
 };
+
+/** 이 영업일을 넘기면 기관 임계일과 무관하게 붉게 띄운다. */
+export const STALE_DAYS = 8;
 
 /** 최근에 일어난 일 한 줄. 사실만 적는다 — 기관 평가는 넣지 않는다. */
 export type RecentEntry = {
@@ -110,7 +115,9 @@ export function buildOrgPage(
       waitingDays: signal.daysSinceContact,
       dueLabel: task.due ? formatKoreanDate(task.due) : task.dueNote || "기한 미정",
       overdue: signal.daysSinceContact != null && signal.daysSinceContact > org.replyDays,
+      stale: (signal.daysSinceContact ?? 0) > STALE_DAYS,
     }))
+    // 기한이 아니라 **경과일** 내림차순이다. 오래 방치된 것이 위로 와야 한다.
     .sort((a, b) => (b.waitingDays ?? 0) - (a.waitingDays ?? 0));
 
   const lastContact = [...signals.values()]
@@ -175,6 +182,20 @@ function pickMilestones(wbsTasks: WbsTask[], orgId: OrgId, today: string): WbsIt
       variance: null,
       deliverable: task.deliverable,
     }));
+}
+
+/**
+ * 처음 열 기관.
+ *
+ * 미회신이 가장 많은 곳을 고른다 — 원페이저를 여는 이유가 대개 그것이다.
+ * 미회신이 없으면 진행 중 업무가 가장 많은 곳, 그것도 없으면 주관연구기관.
+ */
+export function defaultOrgId(input: Parameters<typeof buildOrgPage>[1]): OrgId {
+  const rows = orgSummaries(input);
+  const best = [...rows].sort(
+    (a, b) => b.awaitingCount - a.awaitingCount || b.openCount - a.openCount,
+  )[0];
+  return best && (best.awaitingCount > 0 || best.openCount > 0) ? best.org.id : "gmt";
 }
 
 /** 11개 기관 전부의 요약. 어느 기관을 먼저 열지 고를 때 쓴다. */

@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   buildOrgPage,
+  defaultOrgId,
+  STALE_DAYS,
   buildOrgSummaryInput,
   fallbackSummary,
   generateOrgSummary,
@@ -208,5 +210,45 @@ describe("복사용 텍스트", () => {
   it("WBS가 없으면 없다고 적는다", () => {
     const page = buildOrgPage("kimst", input);
     expect(renderOrgPageText(page, fallbackSummary(page))).toMatch(/WBS 시트 없음/);
+  });
+});
+
+describe("기본 선택 기관", () => {
+  it("미회신이 가장 많은 기관을 고른다", () => {
+    // 원페이저를 여는 이유가 대개 그것이다
+    expect(defaultOrgId(input)).toBe("gmt");
+  });
+
+  it("미회신이 없으면 업무가 많은 기관", () => {
+    const noReply = { ...input, events: [] };
+    expect(["gmt", "uwon", "kimst"]).toContain(defaultOrgId(noReply));
+  });
+
+  it("아무것도 없으면 주관연구기관", () => {
+    expect(defaultOrgId({ ...input, tasks: [], events: [] })).toBe("gmt");
+  });
+});
+
+describe("요청사항 정렬·표시", () => {
+  it("경과일 내림차순이다 — 기한이 아니다", () => {
+    const events = [
+      event("t1", "sent", "2026-07-20", { orgId: "gmt" as const }),
+      event("t5", "sent", "2026-08-11", { orgId: "gmt" as const }),
+    ];
+    const tasks = [...TASKS, task({ id: "t5", note: "최근 요청" })];
+    const page = buildOrgPage("gmt", { ...input, tasks, events });
+    expect(page.openRequests.map((item) => item.id)).toEqual(["t1", "t5"]);
+  });
+
+  it("오래 방치된 건을 따로 표시한다", () => {
+    const events = [event("t1", "sent", "2026-07-20", { orgId: "gmt" as const })];
+    const [request] = buildOrgPage("gmt", { ...input, events }).openRequests;
+    expect(request.waitingDays).toBeGreaterThan(STALE_DAYS);
+    expect(request.stale).toBe(true);
+  });
+
+  it("최근 요청은 방치로 보지 않는다", () => {
+    const events = [event("t1", "sent", "2026-08-12", { orgId: "gmt" as const })];
+    expect(buildOrgPage("gmt", { ...input, events }).openRequests[0].stale).toBe(false);
   });
 });

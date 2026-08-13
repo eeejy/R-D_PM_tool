@@ -190,6 +190,13 @@ A기관에 데이터 3종 아직 안 왔음. 금요일까지 다시 확인
 
 '기타 / 미분류'도 원페이지를 만든다. 여기 항목이 쌓이면 별칭 보강 신호다.
 
+**요청사항이 주인공이다.** 기관을 여는 이유가 대개 "그거 아직 답 안 왔는데"이기 때문에,
+면적을 가장 크게 주고 맨 위에 둔다. 정렬은 기한이 아니라 **경과일 내림차순** —
+오래 방치된 것이 위로 와야 한다. 8영업일을 넘기면 기관 임계일과 별개로 붉게 띄운다.
+
+기관 선택은 버튼 11개를 늘어놓는 대신 **드롭다운**이고, 옵션에 미회신 건수가 붙어 고르기
+전에 보인다. 아무것도 고르지 않으면 **미회신이 가장 많은 기관**이 열린다.
+
 요약 문단에는 **집계값만 넘긴다.** 업무 원문을 통째로 넣지 않고, 3문장 이내로 제한하며,
 수치는 그대로 인용하게 한다(모델이 재계산하지 않는다). 모델이 없으면 규칙 요약이 나오고
 화면은 그대로 동작한다 — 요약은 이 기능의 마지막 층이지 전제가 아니다.
@@ -502,7 +509,7 @@ few-shot 2개만 준다. 모델에 맡기면 라벨 조합이 매번 흔들린�
 ```bash
 npm install
 npm run dev        # http://localhost:3000
-npm test           # 403개 테스트
+npm test           # 409개 테스트
 npm run build
 ```
 
@@ -578,7 +585,7 @@ components/    OverviewView · WorkTreeView · WbsView · RfpView · OrgView · 
                QuickAdd · TaskRow · BrandMark · PromptPeek
                AiDailyReport · AiEmail · AiMinutes
 app/           page.tsx (셸 + 상태) · globals.css (디자인 토큰)
-tests/         403개
+tests/         409개
 ```
 
 **원칙 1** — 시간에 의존하는 함수는 전부 `today`를 인자로 받는다(`capture`, `score`, `bucket`, `summarize`, `generateDailyReport`, `generateMinutes`). 그래야 "오늘 기준"이 테스트 가능해진다.
@@ -595,7 +602,7 @@ tests/         403개
 tests/worktree.test.ts    14
 tests/org.test.ts         18  기관 마스터 · 별칭 매칭 · 후보 중복 · 빠른 입력 연결
 tests/history.test.ts     27  영업일 · 파생 지표 · 리마인드 판정 · 점수 반영
-tests/orgPage.test.ts     22  기관별 집계 · 미결 요청 · 요약 입력 범위
+tests/orgPage.test.ts     28  기관별 집계 · 경과일 정렬 · 기본 선택 · 요약 범위
 tests/reminder.test.ts    24  임계일 판정 · 단계 전이 · 경위 주입 · 발송 기록
 tests/handover.test.ts    25  6개 절 조립 · 개요만 LLM · 실패 시 나머지 보존
 tests/weeklyPlan.test.ts  50  표시폭 · 유형 9종 · 골격별 검증 · 업무 연결

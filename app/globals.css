@@ -977,3 +977,26 @@ mark { background: #ffe27a; color: #4a3200; border-radius: 3px; padding: 0 2px; 
 .plan__rule { display: flex; gap: var(--s2); font-size: 11.5px; align-items: baseline; }
 .plan__w { flex: none; width: 46px; text-align: right; color: var(--text-3); font-variant-numeric: tabular-nums; }
 .plan__line { color: var(--text-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 기관 선택 — 버튼 나열 대신 드롭다운 */
+.orgpick { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s4); }
+.orgpick__select { height: 38px; font-size: 14px; font-weight: 600; min-width: 260px; }
+.orgpick__hint { font-size: 12px; color: var(--text-3); }
+
+/* 요청사항이 주인공이다 — 면적을 가장 크게 준다 */
+.oblock--main { border-bottom: 1px solid var(--border); padding: var(--s5); }
+.oreq {
+  display: grid; grid-template-columns: 56px minmax(0, 1fr) auto;
+  gap: var(--s3); align-items: baseline;
+  padding: var(--s3) 0; border-top: 1px solid var(--border);
+}
+.oreq:first-of-type { border-top: 0; }
+.oreq__days {
+  font-size: 15px; font-weight: 700; text-align: right;
+  font-variant-numeric: tabular-nums; color: var(--text-3);
+}
+.oreq__text { font-size: 13.5px; color: var(--text); word-break: keep-all; }
+.oreq__meta { font-size: 11.5px; color: var(--text-3); flex: none; }
+.oreq.is-over .oreq__days { color: var(--warn); }
+.oreq.is-stale .oreq__days { color: var(--danger); }
+.oreq.is-stale .oreq__meta { color: var(--danger); }

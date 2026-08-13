@@ -6,13 +6,15 @@ import {
   buildOrgSummaryPrompt,
   fallbackSummary,
   generateOrgSummary,
+  defaultOrgId,
   orgSummaries,
   renderOrgPageText,
+  STALE_DAYS,
   type OrgPage,
   type OrgSummary,
 } from "@/lib/orgPage";
 import PromptPeek from "./PromptPeek";
-import { ORGS, type OrgId } from "@/lib/org";
+import { type OrgId } from "@/lib/org";
 import { checkOllama, loadLlmConfig, makeCall } from "@/lib/llm";
 import type { TaskEvent } from "@/lib/history";
 import type { MyTask } from "@/lib/mytask";
@@ -41,7 +43,7 @@ export default function OrgView({
   wbsTasks: WbsTask[];
   onCopy: (text: string, label: string) => void;
 }) {
-  const [orgId, setOrgId] = useState<OrgId>("gmt");
+  const [orgId, setOrgId] = useState<OrgId | null>(null);
   const [summary, setSummary] = useState<OrgSummary | null>(null);
   const [busy, setBusy] = useState(false);
   /** 모델이 있으면 요약을 다듬을 수 있다. 없어도 규칙 요약이 나오므로 화면은 그대로다. */
@@ -57,7 +59,9 @@ export default function OrgView({
     [tasks, events, status, wbsTasks, today],
   );
   const rows = useMemo(() => orgSummaries(input), [input]);
-  const page = useMemo(() => buildOrgPage(orgId, input), [orgId, input]);
+  // 고르지 않았으면 미회신이 가장 많은 기관을 연다 — 원페이저를 여는 이유가 대개 그것이다
+  const current = orgId ?? defaultOrgId(input);
+  const page = useMemo(() => buildOrgPage(current, input), [current, input]);
 
   const lines = summary?.lines ?? fallbackSummary(page);
 
@@ -82,22 +86,24 @@ export default function OrgView({
         <p className="view__sub">회의·통화 직전에 여는 화면입니다 · {today} 기준</p>
       </div>
 
-      {/* 어느 기관을 열지 고르는 줄. 미결 건수가 붙어 있어 여기서 이미 판단이 된다 */}
-      <div className="orgbar">
-        {rows.map((row) => (
-          <button
-            key={row.org.id}
-            className="orgbar__item"
-            aria-current={row.org.id === orgId}
-            onClick={() => pick(row.org.id)}
-          >
-            <b>{row.org.name}</b>
-            <small>
-              {row.org.role !== "기타" && `${row.org.role} · `}
-              {row.awaitingCount > 0 ? `미결 ${row.awaitingCount}` : `업무 ${row.openCount}`}
-            </small>
-          </button>
-        ))}
+      {/* 버튼 11개를 늘어놓는 대신 드롭다운. 옵션에 미회신 건수를 붙여 고르기 전에 보이게 한다 */}
+      <div className="orgpick">
+        <select
+          className="select orgpick__select"
+          value={current}
+          onChange={(event) => pick(event.target.value as OrgId)}
+          aria-label="기관 선택"
+        >
+          {rows.map((row) => (
+            <option key={row.org.id} value={row.org.id}>
+              {row.org.name}
+              {row.awaitingCount > 0 ? ` (미회신 ${row.awaitingCount})` : row.openCount > 0 ? ` (업무 ${row.openCount})` : ""}
+            </option>
+          ))}
+        </select>
+        <span className="orgpick__hint">
+          미회신이 많은 기관이 기본으로 열립니다
+        </span>
       </div>
 
       <section className="card onepage">
@@ -144,6 +150,24 @@ export default function OrgView({
           </div>
         </div>
 
+        {/* 요청사항이 주인공이다. 면적을 가장 크게 주고 맨 위에 둔다. */}
+        <section className="oblock oblock--main">
+          <div className="oblock__head">
+            <b>내 요청사항</b>
+            <small>경과일 내림차순 · {STALE_DAYS}영업일 초과는 빨강</small>
+          </div>
+          {page.openRequests.length ? page.openRequests.map((item) => (
+            <div key={item.id} className={`oreq ${item.stale ? "is-stale" : item.overdue ? "is-over" : ""}`}>
+              <span className="oreq__days">{item.waitingDays ?? 0}일</span>
+              <span className="oreq__text">{item.text}</span>
+              <span className="oreq__meta">
+                {item.sentAt || "발송 기록 없음"} 요청 · 기한 {item.dueLabel}
+                {item.overdue && " · 임계일 초과"}
+              </span>
+            </div>
+          )) : <p className="bucket__empty">미회신 요청이 없습니다</p>}
+        </section>
+
         <div className="onepage__grid">
           <Block title="지연 과업" sub="WBS">
             {page.delayedTasks.map((item) => (
@@ -151,19 +175,6 @@ export default function OrgView({
                 <span className="orow__code">{item.code}</span>
                 <span className="orow__text">{item.title}</span>
                 <span className="orow__meta">{item.dueLabel}{item.variance != null && ` · ${item.variance}%p`}</span>
-              </div>
-            ))}
-          </Block>
-
-          <Block title="미결 요청" sub="내 업무">
-            {page.openRequests.map((item) => (
-              <div key={item.id} className={`orow ${item.overdue ? "is-over" : ""}`}>
-                <span className="orow__text">{item.text}</span>
-                <span className="orow__meta">
-                  {item.sentAt || "발송 기록 없음"}
-                  {item.waitingDays != null && ` · ${item.waitingDays}영업일 대기`}
-                  {item.overdue && " · 임계일 초과"}
-                </span>
               </div>
             ))}
           </Block>
