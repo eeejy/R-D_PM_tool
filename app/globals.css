@@ -962,3 +962,6 @@ mark { background: #ffe27a; color: #4a3200; border-radius: 3px; padding: 0 2px; 
   .onepage__grid { grid-template-columns: minmax(0, 1fr); }
   .oblock:nth-child(odd) { border-right: 0; }
 }
+
+/* 재촉 목록의 행동 버튼 — 초안 / 발송함 / 회신옴 */
+.reminder__acts { display: flex; gap: var(--s1); flex: none; }
