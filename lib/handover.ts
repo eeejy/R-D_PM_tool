@@ -1,157 +1,177 @@
 /**
- * 인수인계서.
+ * 인수인계서 — 6개 절, 조립이 주(主)고 LLM은 한 단락뿐.
  *
- * **전제가 하나 있다.** 담당자가 바뀔 때 크게 유실되는 것은 진행 중 과업 목록이 아니다.
- * 그건 업무트리를 열면 보인다. 유실되는 것은 **"왜 이 상태인지"** — 당초 6월이던 기한이
- * 왜 9월이 됐는지, 그 3번의 연기에 무슨 사정이 있었는지다.
+ * 앞선 판(`handover.ts`)은 세 절을 전부 LLM으로 문장화했다. 그 결과 **모델이 죽으면
+ * 문서의 대부분이 규칙 문장으로 떨어졌다.** 인수인계서는 그러면 안 된다 — 담당자가
+ * 바뀌는 날 열어보는 문서인데 모델 사정에 품질이 좌우되면 곤란하다.
  *
- * 그래서 이 문서는 현재 상태가 아니라 **경위**를 중심으로 뽑는다.
+ * 그래서 이 판은 뒤집었다. **LLM은 `사업 개요` 한 단락만 만들고, 나머지 다섯 절은
+ * 전부 기존 데이터로 조립한다.** 모델이 실패해도 문서의 대부분은 그대로 나온다.
  *
- * 지켜야 할 선이 둘 있다.
+ * 출력은 플레인 텍스트다. HWP·PDF 렌더링은 하지 않는다 — 받는 사람이 어디에든
+ * 붙여 넣을 수 있어야 한다.
  *
- *   1) **기록되지 않은 사유를 지어내지 않는다.** 사유가 없는 연기는 "사유 미기재"로
- *      그대로 둔다. 인수인계서는 나중에 근거 문서가 된다.
- *   2) **기관을 평가하지 않는다.** "A기관 대응이 느림" 같은 문장이 문서로 남으면
- *      곤란해진다. 사실만 적는다 — "3회 연기, 최종 회신 6월 20일".
+ * React를 import하지 않는다.
  */
 
 import { deriveSignals, type Holidays, NO_HOLIDAYS, type TaskEvent, type TaskSignals } from "./history";
-import { asText, isRecord, oneLine, parseResponse, type LlmCall } from "./llm";
+import { asTextList, isRecord, oneLine, parseResponse, type LlmCall, type LlmConfig } from "./llm";
 import type { MyTask } from "./mytask";
-import { ORGS, orgName, type Org, type OrgId } from "./org";
+import { ORGS, orgName, replyDaysOf, type OrgId } from "./org";
 import { daysBetween, formatKoreanDate } from "./text";
 import { categoryTitle } from "./worktree";
+import type { WbsStatus } from "./wbsStatus";
+import type { WbsTask } from "./types";
 
-/** 섹션 하나에 들어가는 항목. `line`은 나중에 채워진다. */
-export type HandoverItem = {
-  id: string;
-  orgId: OrgId;
-  orgLabel: string;
-  category: string;
-  /** 등록 원문. 문장의 유일한 재료다. */
-  text: string;
-  /** 화면·문서에 함께 띄우는 사실들 */
-  facts: string[];
+/** 절 순서 고정. 추가하거나 이름을 바꾸지 않는다. */
+export const SECTIONS = ["overview", "ongoing", "awaiting", "orgNotes", "upcoming", "issues"] as const;
+export type SectionId = (typeof SECTIONS)[number];
+
+export const SECTION_TITLE: Record<SectionId, string> = {
+  overview: "사업 개요",
+  ongoing: "진행 중 과업",
+  awaiting: "미결 요청사항",
+  orgNotes: "기관별 특이사항",
+  upcoming: "다가오는 일정",
+  issues: "주요 쟁점",
 };
 
-/** 기관별 접촉 이력 한 줄. 숫자와 날짜뿐이라 LLM을 태우지 않는다. */
+/** 이 절만 모델이 만든다. 나머지는 전부 조립이다. */
+export const LLM_SECTION: SectionId = "overview";
+
+export const EMPTY_LINE = "해당 없음";
+export const FAILED_LINE = "(생성 실패 — 직접 작성)";
+
+/** 반복 지연으로 볼 기준. 두 번 밀린 건 우연일 수 있지만 그 이상은 패턴이다. */
+export const REPEAT_DELAY = 2;
+
+export type HandoverInput = {
+  projectName: string;
+  today: string;
+  tasks: MyTask[];
+  events?: TaskEvent[];
+  status?: WbsStatus | null;
+  wbsTasks?: WbsTask[];
+  issues?: { text: string; org?: string; at?: string }[];
+  holidays?: Holidays;
+};
+
 export type OrgContact = {
   orgId: OrgId;
   name: string;
-  role: Org["role"];
   openCount: number;
   awaitingCount: number;
   lastContact: string;
 };
 
-export type HandoverFacts = {
+export type HandoverDoc = {
+  projectName: string;
   asOf: string;
-  ongoing: HandoverItem[];
-  awaiting: HandoverItem[];
-  delayed: HandoverItem[];
+  /** 절 이름 → 그 절의 줄들. 비어 있어도 키는 남는다. */
+  sections: Record<SectionId, string[]>;
   byOrg: OrgContact[];
+  /** 개요가 모델에서 왔는지 */
+  fromLlm: boolean;
+  text: string;
+  note?: string;
 };
 
-export type SectionId = "ongoing" | "awaiting" | "delayed";
+/* ── 조립 — 다섯 절 ─────────────────────────────────────── */
 
-export const SECTION_TITLE: Record<SectionId, string> = {
-  ongoing: "진행 중 과업",
-  awaiting: "미결 요청",
-  delayed: "지연 이력",
-};
+function signalsOf(input: HandoverInput): Map<string, TaskSignals> {
+  const { tasks, events = [], today, holidays = NO_HOLIDAYS } = input;
+  return new Map(tasks.map((task) => [task.id, deriveSignals(events, task.id, today, holidays)]));
+}
 
-/* ── 선별 — 전부 룰 ─────────────────────────────────────── */
+/** 진행 중 과업 — WBS 지연·주의 항목과 내 업무를 함께 싣는다. */
+export function buildOngoing(input: HandoverInput, signals: Map<string, TaskSignals>): string[] {
+  const rows: string[] = [];
+  const status = input.status;
+
+  if (status) {
+    rows.push(`전체 진척 계획 ${status.overall.planned}% / 실적 ${status.overall.progress}% (${signed(status.overall.variance)}%p)`);
+    for (const item of status.delayed.slice(0, 10)) {
+      rows.push(`[지연] ${item.code} ${item.title} · ${item.org} · ${item.variance ?? "-"}%p · ${item.dueLabel}`);
+    }
+    for (const item of status.watch.slice(0, 5)) {
+      rows.push(`[주의] ${item.code} ${item.title} · ${item.org} · ${item.variance ?? "-"}%p`);
+    }
+  }
+
+  for (const task of input.tasks.filter((item) => item.status !== "완료")) {
+    const signal = signals.get(task.id);
+    const extra = signal && signal.postponeCount > 0 ? ` · ${signal.postponeCount}회 연기` : "";
+    rows.push(`[내 업무] ${task.title} · ${orgLabel(task)} · ${categoryTitle(task.categoryId)} · ${dueLabel(task)}${extra}`);
+  }
+
+  return rows;
+}
+
+/** 미결 요청사항 — 기관별 미회신. 오래 기다린 것부터. */
+export function buildAwaiting(input: HandoverInput, signals: Map<string, TaskSignals>): string[] {
+  return input.tasks
+    .filter((task) => task.status !== "완료" && signals.get(task.id)?.awaitingReply)
+    .map((task) => ({ task, signal: signals.get(task.id)! }))
+    .sort((a, b) => (b.signal.daysSinceContact ?? 0) - (a.signal.daysSinceContact ?? 0))
+    .map(({ task, signal }) => {
+      const over = signal.daysSinceContact != null && signal.daysSinceContact > replyDaysOf(task.orgId);
+      return `${orgLabel(task)} · ${task.title} · ${signal.lastContact || "발송 기록 없음"} 요청` +
+        `${signal.daysSinceContact != null ? ` · ${signal.daysSinceContact}영업일 대기` : ""}` +
+        `${over ? " · 임계일 초과" : ""}` +
+        `${signal.reminderStage > 0 ? ` · 재촉 ${signal.reminderStage}회` : ""}`;
+    });
+}
 
 /**
- * 인수인계 대상을 고른다.
+ * 기관별 특이사항 — 반복해서 밀린 항목만.
  *
- * 한 업무가 여러 섹션에 나와도 괜찮다. 진행 중이면서 3회 연기된 건은 목록에도 있고
- * 경위에도 있어야 한다 — 인계받는 사람은 두 곳에서 다른 것을 읽는다.
+ * **기관을 평가하지 않는다.** "대응이 느림" 같은 문장이 문서로 남으면 곤란해진다.
+ * 사실만 적는다 — "3회 연기, 당초 6월 30일 → 현재 9월 30일, 사유 미기재".
  */
-export function selectHandover(
-  tasks: MyTask[],
-  events: TaskEvent[],
-  today: string,
-  holidays: Holidays = NO_HOLIDAYS,
-): HandoverFacts {
-  const open = tasks.filter((task) => task.status !== "완료");
-  const signals = new Map<string, TaskSignals>(
-    tasks.map((task) => [task.id, deriveSignals(events, task.id, today, holidays)]),
-  );
+export function buildOrgNotes(input: HandoverInput, signals: Map<string, TaskSignals>): string[] {
+  const rows: string[] = [];
+  for (const org of ORGS) {
+    const mine = input.tasks.filter((task) => (task.orgId ?? "etc") === org.id && task.status !== "완료");
+    const repeated = mine.filter((task) => (signals.get(task.id)?.postponeCount ?? 0) >= REPEAT_DELAY);
+    if (!repeated.length) continue;
 
-  const ongoing = open.map((task) => toItem(task, signals.get(task.id)!, "ongoing", today));
-
-  const awaiting = open
-    .filter((task) => signals.get(task.id)!.awaitingReply)
-    .map((task) => toItem(task, signals.get(task.id)!, "awaiting", today));
-
-  const delayed = open
-    .filter((task) => {
+    rows.push(`[${org.name}]`);
+    for (const task of repeated) {
       const signal = signals.get(task.id)!;
-      const overdue = task.due ? (daysBetween(today, task.due) ?? 0) < 0 : false;
-      return signal.postponeCount >= 1 || overdue;
-    })
-    .map((task) => toItem(task, signals.get(task.id)!, "delayed", today));
-
-  return { asOf: today, ongoing, awaiting, delayed, byOrg: contactsByOrg(open, signals) };
-}
-
-function toItem(task: MyTask, signal: TaskSignals, section: SectionId, today: string): HandoverItem {
-  const orgId = task.orgId ?? "etc";
-  return {
-    id: task.id,
-    orgId,
-    orgLabel: task.org || orgName(orgId),
-    category: categoryTitle(task.categoryId),
-    text: (task.note || task.title).replace(/\s+/g, " ").trim(),
-    facts: factsFor(task, signal, section, today),
-  };
-}
-
-/** 섹션마다 필요한 사실이 다르다. 여기서 조립한 값만 모델에 넘어간다. */
-function factsFor(task: MyTask, signal: TaskSignals, section: SectionId, today: string): string[] {
-  const facts: string[] = [];
-
-  if (section === "ongoing") {
-    facts.push(`상태 ${task.status}`);
-    facts.push(task.due ? `기한 ${formatKoreanDate(task.due)}` : task.dueNote || "기한 미정");
-  }
-
-  if (section === "awaiting") {
-    if (signal.lastContact) facts.push(`${formatKoreanDate(signal.lastContact)} 요청`);
-    if (signal.daysSinceContact != null) facts.push(`${signal.daysSinceContact}영업일 대기`);
-    if (signal.reminderStage > 0) facts.push(`재촉 ${signal.reminderStage}회`);
-  }
-
-  if (section === "delayed") {
-    if (signal.originalDue && signal.currentDue && signal.originalDue !== signal.currentDue) {
-      facts.push(`당초 ${formatKoreanDate(signal.originalDue)} → 현재 ${formatKoreanDate(signal.currentDue)}`);
+      const span = signal.originalDue && signal.currentDue && signal.originalDue !== signal.currentDue
+        ? ` · 당초 ${formatKoreanDate(signal.originalDue)} → 현재 ${formatKoreanDate(signal.currentDue)}`
+        : "";
+      const reason = signal.postponeNotes.length ? ` · 사유: ${signal.postponeNotes.join(" / ")}` : " · 사유 미기재";
+      rows.push(`  ${task.title} · ${signal.postponeCount}회 연기${span}${reason}`);
     }
-    if (signal.totalSlipDays > 0) facts.push(`누적 ${signal.totalSlipDays}일 연기`);
-    if (signal.postponeCount > 0) facts.push(`${signal.postponeCount}회 연기`);
-
-    const overdueDays = task.due ? daysBetween(today, task.due) : null;
-    if (overdueDays != null && overdueDays < 0) facts.push(`기한 ${Math.abs(overdueDays)}일 초과`);
-
-    // 기록되지 않은 사유를 지어내지 않는다. 없으면 없다고 적는다.
-    facts.push(signal.postponeNotes.length ? `사유: ${signal.postponeNotes.join(" / ")}` : "사유 미기재");
   }
-
-  return facts;
+  return rows;
 }
 
-/** 기관 11개 전부. 한 건도 없는 기관도 남긴다 — 없다는 사실도 인계 내용이다. */
-function contactsByOrg(open: MyTask[], signals: Map<string, TaskSignals>): OrgContact[] {
+/** 다가오는 일정 — WBS의 마일스톤·산출물 중 아직 안 지난 것. */
+export function buildUpcoming(input: HandoverInput): string[] {
+  const { wbsTasks = [], today } = input;
+  return wbsTasks
+    .filter((task) => (task.milestone || task.deliverable) && task.end && (daysBetween(today, task.end) ?? -1) >= 0)
+    .sort((a, b) => a.end.localeCompare(b.end))
+    .slice(0, 10)
+    .map((task) => `${formatKoreanDate(task.end)} · ${task.title} · ${task.owner}${task.deliverable ? ` · ${task.deliverable}` : ""}`);
+}
+
+/** 주요 쟁점 — 미해결로 남은 것. 회의록에서 들어온다. */
+export function buildIssues(input: HandoverInput): string[] {
+  return (input.issues ?? []).map(
+    (issue) => `${issue.text}${issue.org ? ` · ${issue.org}` : ""}${issue.at ? ` · ${issue.at}` : ""}`,
+  );
+}
+
+function contactsByOrg(input: HandoverInput, signals: Map<string, TaskSignals>): OrgContact[] {
   return ORGS.map((org) => {
-    const mine = open.filter((task) => (task.orgId ?? "etc") === org.id);
-    const contacts = mine
-      .map((task) => signals.get(task.id)?.lastContact ?? "")
-      .filter(Boolean)
-      .sort();
+    const mine = input.tasks.filter((task) => (task.orgId ?? "etc") === org.id && task.status !== "완료");
+    const contacts = mine.map((task) => signals.get(task.id)?.lastContact ?? "").filter(Boolean).sort();
     return {
       orgId: org.id,
       name: org.name,
-      role: org.role,
       openCount: mine.length,
       awaitingCount: mine.filter((task) => signals.get(task.id)?.awaitingReply).length,
       lastContact: contacts.pop() ?? "",
@@ -159,158 +179,149 @@ function contactsByOrg(open: MyTask[], signals: Map<string, TaskSignals>): OrgCo
   });
 }
 
-/* ── LLM 입출력 ──────────────────────────────────────────── */
+/* ── 개요 — 유일하게 모델이 만드는 절 ──────────────────── */
 
-const SECTION_INSTRUCTION: Record<SectionId, string> = {
-  ongoing: "각 과업이 지금 어떤 상태인지 한 문장으로 정리합니다.",
-  awaiting: "어떤 요청을 언제 보냈고 얼마나 기다리고 있는지 한 문장으로 정리합니다.",
-  delayed: "당초 기한과 현재 기한, 연기 횟수와 기록된 사유를 한두 문장의 경위로 정리합니다.",
-};
+export const OVERVIEW_SYSTEM = [
+  "당신은 공공 R&D 사업 인수인계서의 '사업 개요' 단락을 쓰는 보조자입니다.",
+  "후임 담당자가 처음 읽는 세 문단을 만듭니다.",
+  "다음을 반드시 지킵니다.",
+  "- 주어진 집계값만 씁니다. 새 숫자를 만들거나 계산하지 않습니다.",
+  "- 기관을 평가하거나 탓하는 표현을 쓰지 않습니다. 사실만 적습니다.",
+  "- 기록되지 않은 지연 사유를 추측하지 않습니다.",
+  "- 세 문단은 각각 사업 현황 / 지금 걸려 있는 것 / 인계받아 먼저 볼 것 순입니다.",
+  "- 문단마다 2문장 이내, 문어체 존댓말로 씁니다.",
+  "- JSON만 출력합니다. 설명을 덧붙이지 않습니다.",
+].join("\n");
 
-export function handoverSystem(section: SectionId): string {
-  return [
-    "당신은 공공 R&D 사업담당자의 인수인계서 문장을 정리하는 보조자입니다.",
-    SECTION_INSTRUCTION[section],
-    "다음을 반드시 지킵니다.",
-    "- 주어진 사실 외의 내용을 만들지 않습니다. 특히 기록되지 않은 지연 사유를 추측하지 않습니다.",
-    "- 사유가 '사유 미기재'이면 그대로 '사유는 기록되지 않았습니다'로 씁니다.",
-    "- 기관을 평가하거나 탓하는 표현을 쓰지 않습니다. 사실만 적습니다.",
-    "- 항목을 합치거나 빼지 않습니다. id는 입력에 있던 값을 그대로 씁니다.",
-    "- 문어체 존댓말로 쓰고, 항목당 1~2문장을 넘기지 않습니다.",
-    "- JSON만 출력합니다. 설명을 덧붙이지 않습니다.",
-  ].join("\n");
+/** 개요에 넘기는 값. **집계값뿐이다** — 업무 원문을 통째로 넣지 않는다. */
+export function buildOverviewInput(input: HandoverInput, signals: Map<string, TaskSignals>) {
+  const open = input.tasks.filter((task) => task.status !== "완료");
+  return {
+    projectName: input.projectName,
+    asOf: input.today,
+    progress: input.status
+      ? { planned: input.status.overall.planned, actual: input.status.overall.progress, variance: input.status.overall.variance }
+      : null,
+    delayedCount: input.status?.delayed.length ?? 0,
+    openCount: open.length,
+    awaitingCount: open.filter((task) => signals.get(task.id)?.awaitingReply).length,
+    repeatDelayCount: open.filter((task) => (signals.get(task.id)?.postponeCount ?? 0) >= REPEAT_DELAY).length,
+    issueCount: (input.issues ?? []).length,
+    upcomingCount: buildUpcoming(input).length,
+  };
 }
 
-export function buildSectionPrompt(section: SectionId, items: HandoverItem[], asOf: string): string {
+export function buildOverviewPrompt(input: HandoverInput, signals: Map<string, TaskSignals>): string {
   return [
-    `기준일 ${asOf} · 인수인계서 [${SECTION_TITLE[section]}] 항목입니다.`,
+    "아래 집계값으로 인수인계서의 '사업 개요' 세 문단을 쓰세요.",
     "",
-    JSON.stringify(
-      items.map((item) => ({ id: item.id, org: item.orgLabel, text: item.text, facts: item.facts })),
-      null,
-      2,
-    ),
+    JSON.stringify(buildOverviewInput(input, signals), null, 2),
     "",
-    '출력 형식: {"lines":[{"id":"...","line":"..."}]}',
+    '출력 형식: {"overview":["문단1","문단2","문단3"]}',
     "JSON만 출력하세요.",
   ].join("\n");
 }
 
-export type HandoverLine = { id: string; line: string };
-
-export function validateHandoverOutput(value: unknown): HandoverLine[] | null {
+export function validateOverview(value: unknown): string[] | null {
   if (!isRecord(value)) return null;
-  const raw = value.lines ?? value.items ?? value.results;
-  if (!Array.isArray(raw)) return null;
-  const lines = raw
-    .map((entry) => {
-      if (!isRecord(entry)) return null;
-      const id = asText(entry.id);
-      const line = oneLine(entry.line ?? entry.text);
-      return id && line ? { id, line } : null;
-    })
-    .filter((entry): entry is HandoverLine => entry !== null);
-  return lines.length ? lines : null;
+  const lines = asTextList(value.overview ?? value.summary ?? value.lines).map(oneLine).filter(Boolean);
+  return lines.length ? lines.slice(0, 3) : null;
 }
 
 /* ── 조립 ───────────────────────────────────────────────── */
 
-export type HandoverEntry = { item: HandoverItem; line: string; fromLlm: boolean };
-
-export type Handover = {
-  asOf: string;
-  sections: Record<SectionId, HandoverEntry[]>;
+/** 개요를 빼고 다섯 절을 먼저 만든다. 모델과 무관하게 항상 나온다. */
+export function assembleSections(input: HandoverInput): {
+  sections: Record<SectionId, string[]>;
   byOrg: OrgContact[];
-  /** 모델을 못 쓴 섹션의 사유. 비어 있으면 정상. */
-  notes: string[];
-};
-
-/** 규칙만으로 만드는 문장. 사실을 그대로 이어 붙인다 — 어색해도 틀리지는 않는다. */
-export function fallbackLine(item: HandoverItem): string {
-  const facts = item.facts.join(" · ");
-  return `${item.orgLabel ? `[${item.orgLabel}] ` : ""}${item.text}${facts ? ` — ${facts}` : ""}`;
+  signals: Map<string, TaskSignals>;
+} {
+  const signals = signalsOf(input);
+  return {
+    signals,
+    byOrg: contactsByOrg(input, signals),
+    sections: {
+      overview: [],
+      ongoing: buildOngoing(input, signals),
+      awaiting: buildAwaiting(input, signals),
+      orgNotes: buildOrgNotes(input, signals),
+      upcoming: buildUpcoming(input),
+      issues: buildIssues(input),
+    },
+  };
 }
 
-/** 입력 기준으로 다시 맞춘다. 모델이 지어낸 id는 버리고 빠뜨린 항목은 규칙 문장으로 채운다. */
-export function bindSection(items: HandoverItem[], lines: HandoverLine[] | null): HandoverEntry[] {
-  const byId = new Map((lines ?? []).map((entry) => [entry.id, entry.line]));
-  return items.map((item) => {
-    const line = byId.get(item.id);
-    return { item, line: line || fallbackLine(item), fromLlm: Boolean(line) };
-  });
+/** 플레인 텍스트로 찍는다. HWP·PDF 렌더링은 하지 않는다. */
+export function renderHandoverDoc(doc: HandoverDoc): string {
+  const lines: string[] = [`${doc.projectName || "사업"} 업무 인수인계서`, `기준일 ${doc.asOf}`, ""];
+
+  for (const id of SECTIONS) {
+    lines.push(`□ ${SECTION_TITLE[id]}`);
+    const rows = doc.sections[id];
+    if (!rows.length) lines.push(`  ○ ${EMPTY_LINE}`);
+    else for (const row of rows) lines.push(row.startsWith("[") || row.startsWith("  ") ? `  ${row}` : `  ○ ${row}`);
+    lines.push("");
+  }
+
+  lines.push("□ 기관별 접촉 이력");
+  lines.push("  기관 / 진행 중 / 미결 / 최종 접촉");
+  for (const contact of doc.byOrg) {
+    lines.push(`  ${contact.name} / ${contact.openCount}건 / ${contact.awaitingCount}건 / ${contact.lastContact || "기록 없음"}`);
+  }
+
+  if (doc.note) lines.push("", `※ 사업 개요는 자동 생성하지 못했습니다 (${doc.note}). 직접 작성해 주세요.`);
+
+  return lines.join("\n").trimEnd();
 }
 
 /**
  * 인수인계서를 만든다.
  *
- * 섹션마다 한 번씩 호출한다. 섹션별로 요구하는 문체가 다르고, 한 번에 던지면 뒤쪽
- * 섹션이 조용히 부실해진다. 섹션 ④는 호출하지 않는다 — 숫자와 날짜뿐이다.
+ * **모델이 실패해도 다섯 절은 그대로 나온다.** 개요만 "생성 실패 — 직접 작성"으로
+ * 남는다. 이게 이 기능의 조건이다.
  */
-export async function generateHandover(
-  tasks: MyTask[],
-  events: TaskEvent[],
-  today: string,
-  call: LlmCall | null,
-  holidays: Holidays = NO_HOLIDAYS,
-): Promise<Handover> {
-  const facts = selectHandover(tasks, events, today, holidays);
-  const sections = {} as Record<SectionId, HandoverEntry[]>;
-  const notes: string[] = [];
+export async function generateHandoverDoc(input: HandoverInput, call: LlmCall | null): Promise<HandoverDoc> {
+  const { sections, byOrg, signals } = assembleSections(input);
+  const base: HandoverDoc = {
+    projectName: input.projectName,
+    asOf: input.today,
+    sections,
+    byOrg,
+    fromLlm: false,
+    text: "",
+  };
 
-  for (const section of ["ongoing", "awaiting", "delayed"] as SectionId[]) {
-    const items = facts[section];
-    if (!items.length || !call) {
-      sections[section] = bindSection(items, null);
-      continue;
-    }
-    try {
-      const raw = await call(buildSectionPrompt(section, items, today), handoverSystem(section));
-      sections[section] = bindSection(items, parseResponse(raw, validateHandoverOutput));
-    } catch (cause) {
-      // 한 섹션이 실패해도 나머지는 계속한다. 문서는 나와야 한다.
-      sections[section] = bindSection(items, null);
-      notes.push(`${SECTION_TITLE[section]}: ${cause instanceof Error ? cause.message : "모델 호출 실패"}`);
-    }
+  if (!call) {
+    const doc = { ...base, sections: { ...sections, overview: [FAILED_LINE] }, note: "모델에 연결되지 않았습니다." };
+    return { ...doc, text: renderHandoverDoc(doc) };
   }
 
-  return { asOf: today, sections, byOrg: facts.byOrg, notes };
+  try {
+    const raw = await call(buildOverviewPrompt(input, signals), OVERVIEW_SYSTEM);
+    const overview = parseResponse(raw, validateOverview);
+    const doc = { ...base, sections: { ...sections, overview }, fromLlm: true };
+    return { ...doc, text: renderHandoverDoc(doc) };
+  } catch (cause) {
+    const doc = {
+      ...base,
+      sections: { ...sections, overview: [FAILED_LINE] },
+      note: cause instanceof Error ? cause.message : "모델 호출에 실패했습니다.",
+    };
+    return { ...doc, text: renderHandoverDoc(doc) };
+  }
 }
 
-/** 내보내기용 텍스트. 섹션 ④는 표로 그대로 찍는다. */
-export function renderHandoverText(handover: Handover): string {
-  const lines: string[] = [`업무 인수인계서 (기준일 ${handover.asOf})`, ""];
+/** 개요 한 단락짜리라 출력 상한을 짧게 둔다. */
+export const HANDOVER_LLM_OPTIONS: Partial<LlmConfig> = { temperature: 0.3, numPredict: 800 };
 
-  for (const section of ["ongoing", "awaiting", "delayed"] as SectionId[]) {
-    const entries = handover.sections[section];
-    lines.push(`□ ${SECTION_TITLE[section]} ${entries.length}건`);
-    if (!entries.length) {
-      lines.push("  - 해당 없음");
-    } else {
-      // 기관별로 묶어야 인계받는 사람이 한 기관씩 읽을 수 있다
-      for (const org of ORGS) {
-        const mine = entries.filter((entry) => entry.item.orgId === org.id);
-        if (!mine.length) continue;
-        lines.push(`  [${org.name}]`);
-        for (const entry of mine) {
-          lines.push(`    - ${entry.line}`);
-          if (entry.fromLlm) lines.push(`      · ${entry.item.facts.join(" · ")}`);
-        }
-      }
-    }
-    lines.push("");
-  }
+function orgLabel(task: MyTask): string {
+  return task.org || (task.orgId ? orgName(task.orgId) : "기관 미지정");
+}
 
-  lines.push("□ 기관별 접촉 이력");
-  lines.push("    기관 / 진행 중 / 미결 / 최종 접촉");
-  for (const contact of handover.byOrg) {
-    lines.push(
-      `    ${contact.name} / ${contact.openCount}건 / ${contact.awaitingCount}건 / ${contact.lastContact || "기록 없음"}`,
-    );
-  }
+function dueLabel(task: MyTask): string {
+  return task.due ? formatKoreanDate(task.due) : task.dueNote || "기한 미정";
+}
 
-  if (handover.notes.length) {
-    lines.push("", `※ 일부 섹션은 규칙 문장으로 작성했습니다 (${handover.notes.join("; ")})`);
-  }
-
-  return lines.join("\n").trimEnd();
+function signed(value: number): string {
+  return value > 0 ? `+${value}` : String(value);
 }

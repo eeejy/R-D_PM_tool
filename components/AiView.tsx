@@ -204,7 +204,10 @@ export default function AiView({
       )}
       {tab === "minutes" && <AiMinutes today={today} makeCall={call} onAdd={onAdd} onCopy={copy} />}
       {tab === "handover" && (
-        <AiHandover today={today} tasks={tasks} events={events} makeCall={call} onCopy={copy} />
+        <AiHandover
+          today={today} projectName={projectName} tasks={tasks} events={events}
+          status={status} wbsTasks={wbsTasks} llmReady={connected} onCopy={copy}
+        />
       )}
       {tab === "weekly" && (
         <AiWeekly
