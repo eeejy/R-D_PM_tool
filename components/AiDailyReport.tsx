@@ -14,6 +14,7 @@ import {
 } from "@/lib/dailyReport";
 import type { MyTask } from "@/lib/mytask";
 import type { LlmCall } from "@/lib/llm";
+import type { TaskSignals } from "@/lib/history";
 
 /**
  * 일일 업무보고.
@@ -24,18 +25,21 @@ import type { LlmCall } from "@/lib/llm";
 export default function AiDailyReport({
   today,
   tasks,
+  signals,
   makeCall,
   onCopy,
 }: {
   today: string;
   tasks: MyTask[];
+  /** 지연·회신 지표. 보고 근거에 "3회 연기", "회신 대기 5영업일 경과"로 붙는다. */
+  signals?: Map<string, TaskSignals>;
   makeCall: () => LlmCall | null;
   onCopy: (text: string, label: string) => void;
 }) {
   const [report, setReport] = useState<DailyReport | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const items = useMemo(() => selectReportItems(tasks, today), [tasks, today]);
+  const items = useMemo(() => selectReportItems(tasks, today, signals), [tasks, today, signals]);
   const prompt = useMemo(
     () => (items.length ? buildReportPrompt(buildReportInput(items, today)) : ""),
     [items, today],
@@ -44,7 +48,7 @@ export default function AiDailyReport({
   const run = async () => {
     setBusy(true);
     try {
-      setReport(await generateDailyReport(tasks, today, makeCall()));
+      setReport(await generateDailyReport(tasks, today, makeCall(), signals));
     } finally {
       setBusy(false);
     }

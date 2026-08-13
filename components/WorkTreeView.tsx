@@ -4,6 +4,7 @@ import { useState } from "react";
 import QuickAdd from "./QuickAdd";
 import TaskRow from "./TaskRow";
 import { score, type MyTask } from "@/lib/mytask";
+import type { TaskSignals } from "@/lib/history";
 import { CATEGORIES } from "@/lib/worktree";
 
 /**
@@ -16,6 +17,7 @@ import { CATEGORIES } from "@/lib/worktree";
 export default function WorkTreeView({
   today,
   tasks,
+  signals,
   onAdd,
   onDone,
   onDefer,
@@ -24,6 +26,8 @@ export default function WorkTreeView({
 }: {
   today: string;
   tasks: MyTask[];
+  /** 지연·회신 지표. 이벤트 로그에서 계산해 넘어온다. */
+  signals?: Map<string, TaskSignals>;
   onAdd: (tasks: MyTask[]) => void;
   onDone: (id: string) => void;
   onDefer: (id: string) => void;
@@ -60,7 +64,7 @@ export default function WorkTreeView({
         {CATEGORIES.map((category) => {
           const mine = active
             .filter((task) => task.categoryId === category.id)
-            .map((task) => score(task, today))
+            .map((task) => score(task, today, signals?.get(task.id)))
             .sort((a, b) => b.score - a.score);
           const isOpen = open.includes(category.id);
           const urgent = mine.filter((task) => task.urgency === "긴급").length;

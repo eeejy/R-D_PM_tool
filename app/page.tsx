@@ -9,6 +9,7 @@ import RfpView from "@/components/RfpView";
 import AiView from "@/components/AiView";
 import { todayISO } from "@/lib/date";
 import { makeId, type MyTask } from "@/lib/mytask";
+import { deriveAll, event as makeEvent, type TaskEvent } from "@/lib/history";
 import { summarize, type WbsStatus } from "@/lib/wbsStatus";
 import type { WbsFile } from "@/lib/parseFile";
 import type { RfpDocument } from "@/lib/rfp";
@@ -29,6 +30,7 @@ export default function App() {
   const [projectName, setProjectName] = useState("CDX 연구개발사업");
   const [department, setDepartment] = useState("");
   const [tasks, setTasks] = useState<MyTask[]>([]);
+  const [events, setEvents] = useState<TaskEvent[]>([]);
   const [file, setFile] = useState<WbsFile | null>(null);
   const [fileName, setFileName] = useState("");
   const [rfp, setRfp] = useState<RfpDocument | null>(null);
@@ -46,6 +48,7 @@ export default function App() {
       setProjectName(saved.projectName || "CDX 연구개발사업");
       setDepartment(saved.department ?? "");
       setTasks(saved.tasks);
+      setEvents(saved.events ?? []);
       setFileName(saved.wbsName ?? "");
       setRfp(saved.rfp ?? null);
     }
@@ -65,8 +68,8 @@ export default function App() {
 
   useEffect(() => {
     if (!hydrated) return;
-    store.save({ projectName, department, tasks, wbsName: fileName, rfp, updatedAt: "" });
-  }, [hydrated, projectName, department, tasks, fileName, rfp]);
+    store.save({ projectName, department, tasks, events, wbsName: fileName, rfp, updatedAt: "" });
+  }, [hydrated, projectName, department, tasks, events, fileName, rfp]);
 
   useEffect(() => {
     if (theme) document.documentElement.setAttribute("data-theme", theme);
@@ -84,28 +87,50 @@ export default function App() {
     [file, today],
   );
 
+  /** 이벤트는 덧붙이기만 한다. 고치거나 지우지 않는다. */
+  const record = (...added: TaskEvent[]) => setEvents((current) => [...current, ...added]);
+
   const addTasks = (incoming: MyTask[]) => {
-    setTasks((current) => [...incoming.map((task) => ({ ...task, id: task.id || makeId() })), ...current]);
+    const withIds = incoming.map((task) => ({ ...task, id: task.id || makeId() }));
+    setTasks((current) => [...withIds, ...current]);
+    record(...withIds.map((task) => makeEvent(task.id, "created", today, { to: task.due, orgId: task.orgId })));
     notify(`${incoming.length}건 등록`);
   };
 
-  const markDone = (id: string) =>
+  const markDone = (id: string) => {
+    const target = tasks.find((task) => task.id === id);
     setTasks((current) => current.map((task) =>
       task.id === id ? { ...task, status: "완료" as const, doneAt: today } : task));
+    record(
+      makeEvent(id, "status_changed", today, { from: target?.status, to: "완료", orgId: target?.orgId }),
+      makeEvent(id, "closed", today, { orgId: target?.orgId }),
+    );
+  };
 
-  /** 미루면 기한을 일주일 밀고 미룬 횟수를 센다 — 반복해서 밀리는 일이 드러나야 한다. */
-  const defer = (id: string) =>
-    setTasks((current) => current.map((task) => {
-      if (task.id !== id) return task;
-      const base = task.due ? new Date(`${task.due}T00:00:00`) : new Date(`${today}T00:00:00`);
-      base.setDate(base.getDate() + 7);
-      return { ...task, due: base.toISOString().slice(0, 10), dueNote: "", deferred: (task.deferred ?? 0) + 1 };
-    }));
+  /** 미루면 기한을 일주일 밀고 그 사실을 이벤트로 남긴다 — 반복해서 밀리는 일이 드러나야 한다. */
+  const defer = (id: string) => {
+    const target = tasks.find((task) => task.id === id);
+    if (!target) return;
+    const base = new Date(`${target.due || today}T00:00:00`);
+    base.setDate(base.getDate() + 7);
+    const next = base.toISOString().slice(0, 10);
+    setTasks((current) => current.map((task) => (
+      task.id === id
+        ? { ...task, due: next, dueNote: "", deferred: (task.deferred ?? 0) + 1 }
+        : task
+    )));
+    record(makeEvent(id, "due_changed", today, { from: target.due || today, to: next, orgId: target.orgId }));
+  };
 
   const move = (id: string, categoryId: MyTask["categoryId"]) =>
     setTasks((current) => current.map((task) => (task.id === id ? { ...task, categoryId } : task)));
 
-  const remove = (id: string) => setTasks((current) => current.filter((task) => task.id !== id));
+  /** 업무는 지워도 이벤트는 남긴다. 인수인계의 값어치가 거기서 나온다. */
+  const remove = (id: string) => {
+    const target = tasks.find((task) => task.id === id);
+    setTasks((current) => current.filter((task) => task.id !== id));
+    record(makeEvent(id, "closed", today, { note: "삭제", orgId: target?.orgId }));
+  };
 
   const loadWbs = (next: WbsFile, name: string) => {
     setFile(next);
@@ -121,6 +146,7 @@ export default function App() {
     setProjectName(restored.projectName);
     setDepartment(restored.department ?? "");
     setTasks(restored.tasks);
+    setEvents(restored.events ?? []);
     notify("백업을 불러왔습니다");
   };
 
@@ -128,6 +154,7 @@ export default function App() {
     if (!window.confirm("등록한 업무를 모두 지웁니다. 계속할까요?")) return;
     store.clear();
     setTasks([]);
+    setEvents([]);
     setFile(null);
     setFileName("");
     setRfp(null);
@@ -135,6 +162,12 @@ export default function App() {
   };
 
   const openCount = tasks.filter((task) => task.status !== "완료").length;
+
+  // 화면에 쓰는 지연·회신 지표는 전부 이벤트에서 계산한다. 저장하지 않는다.
+  const signals = useMemo(
+    () => deriveAll(events, tasks.map((task) => task.id), today),
+    [events, tasks, today],
+  );
 
   return (
     <div className="app">
@@ -159,7 +192,7 @@ export default function App() {
 
         <div className="sidebar__foot">
           <input ref={importInput} type="file" hidden accept=".json" onChange={(event) => importBackup(event.target.files?.[0])} />
-          <button className="nav__item" onClick={() => store.exportWorkspace({ projectName, department, tasks, wbsName: fileName, rfp, updatedAt: "" })}>
+          <button className="nav__item" onClick={() => store.exportWorkspace({ projectName, department, tasks, events, wbsName: fileName, rfp, updatedAt: "" })}>
             <span className="nav__icon" aria-hidden>↓</span><span>내보내기</span>
           </button>
           <button className="nav__item" onClick={() => importInput.current?.click()}>
@@ -210,6 +243,7 @@ export default function App() {
             today={today}
             status={status}
             tasks={tasks}
+            signals={signals}
             onAdd={addTasks}
             onDone={markDone}
             onDefer={defer}
@@ -221,6 +255,7 @@ export default function App() {
           <WorkTreeView
             today={today}
             tasks={tasks}
+            signals={signals}
             onAdd={addTasks}
             onDone={markDone}
             onDefer={defer}
@@ -235,6 +270,7 @@ export default function App() {
           <AiView
             today={today}
             tasks={tasks}
+            signals={signals}
             projectName={projectName}
             department={department}
             onAdd={addTasks}

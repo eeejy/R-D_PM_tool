@@ -4,6 +4,7 @@ import { useState } from "react";
 import QuickAdd from "./QuickAdd";
 import TaskRow from "./TaskRow";
 import { bucket, type MyTask } from "@/lib/mytask";
+import type { TaskSignals } from "@/lib/history";
 import type { WbsStatus } from "@/lib/wbsStatus";
 import { VARIANCE_TONE } from "@/lib/variance";
 
@@ -20,6 +21,7 @@ export default function OverviewView({
   today,
   status,
   tasks,
+  signals,
   onAdd,
   onDone,
   onDefer,
@@ -29,6 +31,8 @@ export default function OverviewView({
   today: string;
   status: WbsStatus | null;
   tasks: MyTask[];
+  /** 지연·회신 지표. 이벤트 로그에서 계산해 넘어온다. */
+  signals?: Map<string, TaskSignals>;
   onAdd: (tasks: MyTask[]) => void;
   onDone: (id: string) => void;
   onDefer: (id: string) => void;
@@ -36,7 +40,7 @@ export default function OverviewView({
   onGoTree: () => void;
 }) {
   const [monthOpen, setMonthOpen] = useState(false);
-  const buckets = bucket(tasks, today);
+  const buckets = bucket(tasks, today, signals);
 
   return (
     <div className="view">

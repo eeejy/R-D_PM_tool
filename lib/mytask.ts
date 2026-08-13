@@ -1,6 +1,7 @@
 import { daysBetween, formatKoreanDate } from "./text";
 import type { CategoryId } from "./worktree";
-import type { OrgId } from "./org";
+import { replyDaysOf, type OrgId } from "./org";
+import type { TaskSignals } from "./history";
 
 /**
  * 사업담당자가 직접 처리하는 업무 한 건.
@@ -64,7 +65,7 @@ export type Scored = MyTask & {
  * 사용자가 매긴 우선순위만 믿으면 결국 전부 '높음'이 된다. 그래서 기한·회의·
  * 지연 연계·회신 대기 같은 사실에서 점수를 만들고, 그 근거를 함께 돌려준다.
  */
-export function score(task: MyTask, today: string): Scored {
+export function score(task: MyTask, today: string, signals?: TaskSignals): Scored {
   const dday = task.due ? daysBetween(today, task.due) : null;
   const reasons: string[] = [];
   let points = 0;
@@ -87,9 +88,25 @@ export function score(task: MyTask, today: string): Scored {
   if (task.blocksRnd) { points += 22; reasons.push("연구개발 지연에 직접 영향"); }
   if (task.awaiting) { points += 18; reasons.push(`${task.org || "상대 기관"} 회신 대기`); }
   if (task.categoryId === "budget" || task.categoryId === "report") { points += 12; reasons.push("보고·예산 대응"); }
-  if ((task.deferred ?? 0) >= 2) { points += 15; reasons.push(`${task.deferred}회 미뤄짐`); }
+  // 이벤트 로그가 있으면 그쪽 횟수를 쓴다. 두 곳에서 따로 세면 값이 어긋난다.
+  const postponed = signals ? signals.postponeCount : (task.deferred ?? 0);
+  if (postponed >= 2) { points += 15; reasons.push(`${postponed}회 미뤄짐`); }
   if (!task.org && task.categoryId !== "report") { reasons.push("담당기관 미지정"); }
   if (task.pinned) { points += 40; reasons.push("직접 올림"); }
+
+  // 기억 축 — 이 일이 왜 이렇게까지 밀렸는가. 기존 배점은 건드리지 않고 더하기만 한다.
+  if (signals) {
+    if (signals.postponeCount >= 2) { points += 10; reasons.push("2회 연기"); }
+    if (signals.postponeCount >= 4) { points += 10; reasons.push("4회 이상 연기"); }
+    if (signals.totalSlipDays >= 30) {
+      points += 10;
+      reasons.push(`당초 기한 대비 ${signals.totalSlipDays}일 경과`);
+    }
+    if (signals.daysSinceContact != null && signals.daysSinceContact > replyDaysOf(task.orgId)) {
+      points += 15;
+      reasons.push(`회신 대기 ${signals.daysSinceContact}영업일 경과`);
+    }
+  }
 
   const urgency: Urgency =
     points >= 55 ? "긴급" :
@@ -117,10 +134,10 @@ export type Buckets = {
  * 오늘 → 이번 주 → 이번 달 순으로 나눈다.
  * 기한이 지난 것은 '오늘'로 올린다. 지난 일은 오늘 처리해야 하기 때문이다.
  */
-export function bucket(tasks: MyTask[], today: string): Buckets {
+export function bucket(tasks: MyTask[], today: string, signals?: Map<string, TaskSignals>): Buckets {
   const scored = tasks
     .filter((task) => task.status !== "완료")
-    .map((task) => score(task, today))
+    .map((task) => score(task, today, signals?.get(task.id)))
     .sort((a, b) => b.score - a.score);
 
   const buckets: Buckets = { today: [], week: [], month: [], undated: [] };

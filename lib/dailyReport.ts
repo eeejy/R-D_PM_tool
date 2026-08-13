@@ -9,6 +9,7 @@
  */
 
 import { score, type MyTask, type Scored } from "./mytask";
+import type { TaskSignals } from "./history";
 import { formatKoreanDate } from "./text";
 import { categoryTitle, type CategoryId } from "./worktree";
 import { asText, isRecord, oneLine, parseResponse, type LlmCall } from "./llm";
@@ -74,10 +75,14 @@ export type ReportItem = {
  *
  * 조건은 전부 사실이다. 담당자가 "왜 이게 올라왔냐"고 물으면 화면의 근거로 답할 수 있다.
  */
-export function selectReportItems(tasks: MyTask[], today: string): ReportItem[] {
+export function selectReportItems(
+  tasks: MyTask[],
+  today: string,
+  signals?: Map<string, TaskSignals>,
+): ReportItem[] {
   return tasks
     .filter((task) => task.status !== "완료")
-    .map((task) => score(task, today))
+    .map((task) => score(task, today, signals?.get(task.id)))
     .filter(isReportable)
     .sort((a, b) => b.score - a.score)
     .map(toReportItem);
@@ -268,8 +273,9 @@ export async function generateDailyReport(
   tasks: MyTask[],
   today: string,
   call: LlmCall | null,
+  signals?: Map<string, TaskSignals>,
 ): Promise<DailyReport> {
-  const items = selectReportItems(tasks, today);
+  const items = selectReportItems(tasks, today, signals);
   if (!items.length) return { today, toSupervisor: [], toPI: [] };
   if (!call) return assembleReport(items, today, null);
 
