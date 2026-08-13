@@ -712,7 +712,9 @@ export async function generatePlanItem(
   }
 
   try {
-    let text = normalize(await call(buildPlanPrompt(input), WEEKLY_SYSTEM));
+    // buildPlanPrompt가 이미 규칙을 앞에 담고 있다. system으로 한 번 더 보내면
+    // 같은 지시가 두 벌 들어가 소형 모델이 오히려 헷갈린다.
+    let text = normalize(await call(buildPlanPrompt(input)));
     let check = validateItem(text, type);
     let attempts = 1;
 
