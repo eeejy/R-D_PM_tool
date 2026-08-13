@@ -12,8 +12,10 @@ import {
   TYPE_SPEC,
   typeLabel,
   validateItem,
+  taskToPlanInput,
   width,
 } from "../lib/weeklyPlan";
+import { event } from "../lib/history";
 
 /** 원문에서 그대로 가져온 항목. 검증기 캘리브레이션의 기준점이다. */
 const REAL_ITEM =
@@ -261,9 +263,9 @@ describe("생성 루프", () => {
   });
 });
 
-describe("서식 10종", () => {
+describe("서식 9종", () => {
   it("원문 빈도순으로 10종을 둔다", () => {
-    expect(TYPE_ORDER).toHaveLength(10);
+    expect(TYPE_ORDER).toHaveLength(9);
     expect(TYPE_ORDER[0].id).toBe("T1_계획수립");   // 36건으로 가장 많다
     const counts = TYPE_ORDER.map((item) => item.count);
     expect([...counts].sort((a, b) => b - a)).toEqual(counts);
@@ -277,42 +279,16 @@ describe("서식 10종", () => {
     }
   });
 
-  it("업무성과·기타일정은 골격이 다르다", () => {
-    expect(SHAPE_OF.R1_업무성과).toBe("result");
+  it("기타일정은 골격이 다르다", () => {
     expect(SHAPE_OF.E1_기타일정).toBe("schedule");
     expect(SHAPE_OF.T1_계획수립).toBe("plan");
   });
-});
 
-describe("업무성과 서식", () => {
-  const REAL = "① 민·관 대테러업무 혁신 TF 2차 전체회의 참석(2.26.)";
-
-  it("제목 한 줄이면 통과한다", () => {
-    // 원문 22건 전부 하위 라인이 0개였다
-    const check = validateItem(REAL, "R1_업무성과");
-    expect(check.errors).toEqual([]);
-    expect(check.ok).toBe(true);
-  });
-
-  it("업무계획 기준을 대면 떨어진다 — 그래서 서식을 나눴다", () => {
-    expect(validateItem(REAL, "T1_계획수립").ok).toBe(false);
-  });
-
-  it("본문을 붙이면 잡아낸다", () => {
-    const check = validateItem(`${REAL}\n- (주요내용) 붙이면 안 되는 본문`, "R1_업무성과");
-    expect(check.errors.join()).toMatch(/본문\(-\) 라인 1개/);
-  });
-
-  it("제목이 길면 잡아낸다", () => {
-    const long = `① ${"매우 긴 성과 제목".repeat(8)}(4.1)`;
-    expect(validateItem(long, "R1_업무성과").errors.join()).toMatch(/제목 \d+폭 → 70폭 이하로/);
-  });
-
-  it("담당과·태그 경고를 내지 않는다", () => {
-    // 업무성과에는 (담당과)도 [신규]도 붙이지 않는다
-    expect(validateItem(REAL, "R1_업무성과").warnings).toEqual([]);
+  it("업무성과는 넣지 않는다 — 이 앱은 사업 진행사항만 다룬다", () => {
+    expect(TYPE_ORDER.some((item) => item.label === "업무성과")).toBe(false);
   });
 });
+
 
 describe("기타일정 서식", () => {
   const REAL =
@@ -342,12 +318,6 @@ describe("기타일정 서식", () => {
 describe("서식별 프롬프트", () => {
   const base = { bureau: "기획조정관", dept: "기획재정", titleSeed: "회의 참석", facts: "메모" };
 
-  it("업무성과에는 본문을 쓰지 말라고 한다", () => {
-    const prompt = buildPlanPrompt({ ...base, forceType: "R1_업무성과" });
-    expect(prompt).toMatch(/본문·각주 라인을 쓰지 않는다/);
-    expect(prompt).not.toMatch(/금지 구간/);
-  });
-
   it("기타일정에는 각주 1개까지만 허용한다고 한다", () => {
     const prompt = buildPlanPrompt({ ...base, forceType: "E1_기타일정" });
     expect(prompt).toMatch(/0개 또는 1개만/);
@@ -356,5 +326,54 @@ describe("서식별 프롬프트", () => {
 
   it("업무계획에는 금지 구간을 알려준다", () => {
     expect(buildPlanPrompt({ ...base, forceType: "T1_계획수립" })).toMatch(/82~99폭은 금지 구간/);
+  });
+});
+
+describe("등록된 업무 → 항목 입력", () => {
+  const task = {
+    id: "t1", title: "AI 사업 카탈로그 시스템 구축", categoryId: "pilot" as const,
+    org: "지엠티", orgId: "gmt" as const, due: "2026-09-30", dueNote: "",
+    status: "회신 대기" as const, note: "지엠티 카탈로그 프로토타입 4월, 시범운영 6월",
+    createdAt: "2026-06-01",
+  };
+  const events = [
+    event("t1", "created", "2026-06-01", { to: "2026-06-30", orgId: "gmt" as const }),
+    event("t1", "due_changed", "2026-06-28", { from: "2026-06-30", to: "2026-09-30", note: "기관 회신 지연", orgId: "gmt" as const }),
+    event("t1", "sent", "2026-08-07", { orgId: "gmt" as const }),
+  ];
+  const opts = { bureau: "AI미래기술정보융합단", dept: "인공지능", today: "2026-08-13", events };
+
+  it("등록된 값에서 사실관계를 조립한다", () => {
+    // 업무트리에 있는 내용을 두 번 쓰게 하지 않는다
+    const input = taskToPlanInput(task, opts);
+    expect(input.titleSeed).toBe("AI 사업 카탈로그 시스템 구축");
+    expect(input.facts).toMatch(/대상기관 지엠티/);
+    expect(input.facts).toMatch(/기한 9월 30일/);
+    expect(input.facts).toMatch(/실증·성과관리/);
+  });
+
+  it("지연 이력을 경위로 붙인다", () => {
+    const facts = taskToPlanInput(task, opts).facts;
+    expect(facts).toMatch(/당초 6월 30일 → 현재 9월 30일 \(1회\)/);
+    expect(facts).toMatch(/연기 사유 기관 회신 지연/);
+    expect(facts).toMatch(/회신 대기 8월 7일 요청, 4영업일 경과/);
+  });
+
+  it("이력이 없으면 없는 대로 둔다 — 경위를 지어내지 않는다", () => {
+    const facts = taskToPlanInput(task, { ...opts, events: [] }).facts;
+    expect(facts).not.toMatch(/당초|연기 사유|영업일 경과/);
+    // 등록된 값(상태·기관·기한)은 그대로 남는다 — 이력만 없는 것이다
+    expect(facts).toMatch(/현재상태 회신 대기/);
+  });
+
+  it("이미 밀린 일은 [진행]으로 본다", () => {
+    expect(taskToPlanInput(task, opts).tag).toBe("진행");
+    expect(taskToPlanInput(task, { ...opts, events: [] }).tag).toBe("신규");
+  });
+
+  it("조립한 사실관계가 그대로 프롬프트에 들어간다", () => {
+    const prompt = buildPlanPrompt(taskToPlanInput(task, opts));
+    expect(prompt).toMatch(/연기 사유 기관 회신 지연/);
+    expect(prompt).toMatch(/없는 수치나 일정을 지어내지 마시오/);
   });
 });

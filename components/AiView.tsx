@@ -200,7 +200,12 @@ export default function AiView({
       {tab === "handover" && (
         <AiHandover today={today} tasks={tasks} events={events} makeCall={call} onCopy={copy} />
       )}
-      {tab === "weekly" && <AiWeeklyPlan llmReady={connected} onCopy={copy} />}
+      {tab === "weekly" && (
+        <AiWeeklyPlan
+          today={today} tasks={tasks} events={events}
+          department={department} llmReady={connected} onCopy={copy}
+        />
+      )}
     </div>
   );
 }

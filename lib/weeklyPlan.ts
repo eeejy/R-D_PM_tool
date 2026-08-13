@@ -16,6 +16,11 @@
  */
 
 import { asText, type LlmCall, type LlmConfig } from "./llm";
+import { deriveSignals, type Holidays, NO_HOLIDAYS, type TaskEvent } from "./history";
+import type { MyTask } from "./mytask";
+import { orgName } from "./org";
+import { formatKoreanDate } from "./text";
+import { categoryTitle } from "./worktree";
 
 /* ── 1. 분량 — 표시폭 ────────────────────────────────────── */
 
@@ -59,7 +64,6 @@ export const BUDGET = {
   body1: { max: 78, hard: 81 },
   body2: { min: 100, max: 143, hard: 148 },
   note: { max: 95, hard: 99 },
-  result: { max: 70, hard: 84 },
 } as const;
 
 /**
@@ -81,8 +85,6 @@ export const SHAPE_BUDGET: Record<PlanShape, {
   note: readonly [number, number];
 }> = {
   plan:     { lines: ITEM_TOTAL_LINES, chars: ITEM_TOTAL_CHARS, body: [1, 3], note: [0, 3] },
-  // 22건 전부 하위 라인 0개. 제목 한 줄로 완결한다.
-  result:   { lines: [1, 1], chars: [15, 90], body: [0, 0], note: [0, 0] },
   // 제목 + 각주 0~1개. 날짜가 짧으면 제목에 인라인, 상세하면 ※ 각주로 뺀다.
   schedule: { lines: [1, 2], chars: [15, 150], body: [0, 0], note: [0, 1] },
 };
@@ -92,20 +94,23 @@ export const SHAPE_BUDGET: Record<PlanShape, {
 export type PlanTypeId =
   | "T1_계획수립" | "T2_법령제개정" | "T3_회의행사" | "T4_교육훈련"
   | "T5_점검조사" | "T6_연구용역" | "T7_사업구축" | "T8_인력조직"
-  | "R1_업무성과" | "E1_기타일정";
+  | "E1_기타일정";
 
 /**
- * 서식 골격. **업무계획·업무성과·기타일정은 라인 구성 자체가 다르다.**
+ * 서식 골격. **업무계획과 기타일정은 라인 구성 자체가 다르다.**
  *
- * 업무성과는 22건 전부 하위 라인이 0개였고, 기타일정은 제목 + 각주 0~1개다.
- * 같은 검증기를 그대로 대면 둘 다 "본문 라인 없음"으로 떨어진다.
+ * 기타일정은 제목 + 각주 0~1개라, 업무계획 검증기를 그대로 대면
+ * "본문 라인 없음"으로 떨어진다.
+ *
+ * 업무성과(지난주 실적)는 넣지 않았다. 이 앱이 다루는 건 사업 진행사항이고,
+ * 성과 정리는 다른 자료에서 온다.
  */
-export type PlanShape = "plan" | "result" | "schedule";
+export type PlanShape = "plan" | "schedule";
 
 export const SHAPE_OF: Record<PlanTypeId, PlanShape> = {
   T1_계획수립: "plan", T2_법령제개정: "plan", T3_회의행사: "plan", T4_교육훈련: "plan",
   T5_점검조사: "plan", T6_연구용역: "plan", T7_사업구축: "plan", T8_인력조직: "plan",
-  R1_업무성과: "result", E1_기타일정: "schedule",
+  E1_기타일정: "schedule",
 };
 
 /**
@@ -114,7 +119,6 @@ export const SHAPE_OF: Record<PlanTypeId, PlanShape> = {
  */
 export const TYPE_ORDER: { id: PlanTypeId; label: string; count: number }[] = [
   { id: "T1_계획수립", label: "계획수립", count: 36 },
-  { id: "R1_업무성과", label: "업무성과", count: 22 },
   { id: "T4_교육훈련", label: "교육·훈련", count: 19 },
   { id: "T5_점검조사", label: "점검·조사·분석", count: 17 },
   { id: "E1_기타일정", label: "기타일정", count: 17 },
@@ -321,19 +325,6 @@ export const TYPE_SPEC: Record<PlanTypeId, TypeSpec> = {
       "* 일정 과기부 예산설명(4.10.)→국가심의위원회 대응(5월)→사업별 예산 대응(~12월)",
     ],
   },
-  R1_업무성과: {
-    labels: "제목 한 줄로 완결 — 하위 라인 없음",
-    rules: [
-      "본문(-)과 각주(*※)를 쓰지 않는다. 제목 한 줄로 끝낸다.",
-      "형식: 사안명 + 동사(참석/실시/개최/수검/대응) + (날짜)",
-      "국회·행사 대응은 날짜와 참석자를 함께 적는다. 예: (3.30. / 청장 직무대행 등)",
-      "지난주에 이미 끝난 일이므로 계획·전망을 쓰지 않는다.",
-    ],
-    shots: [
-      "① 민·관 대테러업무 혁신 TF 2차 전체회의 참석(2.26.)",
-      "① 3000톤급 경비함(태평양21호, 3021함) 진수식(4.1)",
-    ],
-  },
   E1_기타일정: {
     labels: "제목 + 각주 0~1개",
     rules: [
@@ -448,12 +439,6 @@ export function buildPlanPrompt(input: PlanInput): string {
 
 /** 서식마다 지켜야 할 분량이 다르다. 업무계획 기준을 업무성과에 대면 안 된다. */
 function budgetLines(shape: PlanShape): string[] {
-  if (shape === "result") {
-    return [
-      `- 제목라인 : ${BUDGET.result.max}폭 이하 (한글 약 35자). 반드시 1줄.`,
-      "- 본문·각주 라인을 쓰지 않는다. 제목 한 줄이 전부다.",
-    ];
-  }
   if (shape === "schedule") {
     return [
       `- 제목라인 : ${BUDGET.title.max}폭 이하. 반드시 1줄.`,
@@ -535,8 +520,8 @@ export function validateItem(text: string, type: PlanTypeId = "T1_계획수립")
     if (NUM_MARKS.includes(line[0])) {
       stats.title += 1;
       stats.lines += 1;
-      const titleMax = shape === "result" ? BUDGET.result.max : BUDGET.title.max;
-      const titleHard = shape === "result" ? BUDGET.result.hard : BUDGET.title.hard;
+      const titleMax = BUDGET.title.max;
+      const titleHard = BUDGET.title.hard;
       if (w > titleHard) errors.push(`${row}행 제목 ${w}폭 → ${titleMax}폭 이하로 ${w - titleMax}폭 줄일 것`);
       else if (w > titleMax) warnings.push(`${row}행 제목 ${w}폭 — 권장 ${titleMax}폭 이하`);
       // 업무성과·기타일정에는 (담당과)를 붙이지 않는다
@@ -631,7 +616,62 @@ export function normalize(text: string): string {
   return out.trim();
 }
 
-/* ── 8. 생성 루프 ───────────────────────────────────────── */
+/* ── 8. 등록된 업무 → 항목 입력 ─────────────────────────── */
+
+/**
+ * 이미 등록된 업무를 서식 입력으로 바꾼다.
+ *
+ * 이 화면에 빈 폼을 두고 사실관계를 손으로 옮겨 적게 하면, 업무트리에 이미 있는
+ * 내용을 두 번 쓰게 된다. **보고사항은 앱 안에 이미 있으니 그것을 그대로 재료로 쓴다.**
+ *
+ * 사실관계는 전부 **등록된 값과 이력에서만** 뽑는다. 모델은 여기 없는 수치를 쓰지
+ * 못한다 — 그러라고 프롬프트에도 못 박혀 있다.
+ */
+export function taskToPlanInput(
+  task: MyTask,
+  options: {
+    bureau: string;
+    dept: string;
+    today: string;
+    events?: TaskEvent[];
+    holidays?: Holidays;
+    tag?: "신규" | "진행";
+  },
+): PlanInput {
+  const { bureau, dept, today, events = [], holidays = NO_HOLIDAYS } = options;
+  const signals = deriveSignals(events, task.id, today, holidays);
+  const facts: string[] = [];
+
+  const org = task.org || (task.orgId ? orgName(task.orgId) : "");
+  if (org) facts.push(`- 대상기관 ${org}`);
+  facts.push(`- 업무영역 ${categoryTitle(task.categoryId)}`);
+  facts.push(`- 현재상태 ${task.status}`);
+  if (task.due) facts.push(`- 기한 ${formatKoreanDate(task.due)}`);
+  else if (task.dueNote) facts.push(`- 기한 ${task.dueNote}`);
+
+  // 이력에 남은 것만 적는다. 없는 경위를 지어내지 않는다.
+  if (signals.postponeCount > 0 && signals.originalDue && signals.currentDue) {
+    facts.push(`- 기한 변경 당초 ${formatKoreanDate(signals.originalDue)} → 현재 ${formatKoreanDate(signals.currentDue)} (${signals.postponeCount}회)`);
+  }
+  for (const note of signals.postponeNotes) facts.push(`- 연기 사유 ${note}`);
+  if (signals.awaitingReply && signals.lastContact) {
+    facts.push(`- 회신 대기 ${formatKoreanDate(signals.lastContact)} 요청${signals.daysSinceContact != null ? `, ${signals.daysSinceContact}영업일 경과` : ""}`);
+  }
+
+  const memo = (task.note || "").replace(/\s+/g, " ").trim();
+  if (memo && memo !== task.title) facts.push(`- 등록 원문 ${memo}`);
+
+  return {
+    bureau,
+    dept,
+    titleSeed: task.title,
+    facts: facts.join("\n"),
+    // 이미 굴러가던 일이면 [진행], 이번에 새로 잡힌 일이면 [신규]
+    tag: options.tag ?? (signals.postponeCount > 0 || signals.reminderStage > 0 ? "진행" : "신규"),
+  };
+}
+
+/* ── 9. 생성 루프 ───────────────────────────────────────── */
 
 export type PlanResult = {
   text: string;
