@@ -7,6 +7,7 @@ import WorkTreeView from "@/components/WorkTreeView";
 import WbsView from "@/components/WbsView";
 import RfpView from "@/components/RfpView";
 import AiView from "@/components/AiView";
+import OrgView from "@/components/OrgView";
 import { todayISO } from "@/lib/date";
 import { makeId, type MyTask } from "@/lib/mytask";
 import { deriveAll, event as makeEvent, type TaskEvent } from "@/lib/history";
@@ -15,12 +16,13 @@ import type { WbsFile } from "@/lib/parseFile";
 import type { RfpDocument } from "@/lib/rfp";
 import * as store from "@/lib/store";
 
-type ViewId = "overview" | "tree" | "wbs" | "rfp" | "ai";
+type ViewId = "overview" | "tree" | "wbs" | "rfp" | "org" | "ai";
 
 const NAV: { id: ViewId; label: string; icon: string }[] = [
   { id: "overview", label: "개요", icon: "◱" },
   { id: "tree", label: "업무트리", icon: "☰" },
   { id: "wbs", label: "연구개발 현황", icon: "▤" },
+  { id: "org", label: "기관별", icon: "◎" },
   { id: "rfp", label: "RFP 검색", icon: "⌕" },
   { id: "ai", label: "보고 생성", icon: "✎" },
 ];
@@ -60,7 +62,7 @@ export default function App() {
     const requested = params.get("view");
     if (q) setRfpQuery(q);
     if (requested === "rfp" || q) setView("rfp");
-    else if (requested === "tree" || requested === "wbs" || requested === "overview" || requested === "ai") setView(requested);
+    else if (requested === "tree" || requested === "wbs" || requested === "overview" || requested === "ai" || requested === "org") setView(requested);
     const storedTheme = window.localStorage.getItem("rnd-flow:theme");
     if (storedTheme === "light" || storedTheme === "dark") setTheme(storedTheme);
     setHydrated(true);
@@ -80,6 +82,15 @@ export default function App() {
     setToast(message);
     window.setTimeout(() => setToast(""), 2400);
   }, []);
+
+  const copy = useCallback(async (text: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      notify(`${label}을 복사했습니다`);
+    } catch {
+      notify("복사하지 못했습니다");
+    }
+  }, [notify]);
 
   // WBS는 상태 파악에만 쓴다. 파일 내용은 저장하지 않고 화면에만 들고 있는다.
   const status: WbsStatus | null = useMemo(
@@ -265,6 +276,16 @@ export default function App() {
         )}
         {view === "wbs" && (
           <WbsView status={status} file={file} fileName={fileName} onLoad={loadWbs} />
+        )}
+        {view === "org" && (
+          <OrgView
+            today={today}
+            tasks={tasks}
+            events={events}
+            status={status}
+            wbsTasks={file?.tasks ?? []}
+            onCopy={copy}
+          />
         )}
         {view === "ai" && (
           <AiView

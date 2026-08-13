@@ -914,3 +914,51 @@ mark { background: #ffe27a; color: #4a3200; border-radius: 3px; padding: 0 2px; 
   font-size: 12.5px; line-height: 1.9; white-space: pre-wrap; word-break: keep-all;
   max-height: 620px; overflow: auto;
 }
+
+/* --- 기관별 원페이지 ------------------------------------------------------ */
+
+/* 어느 기관을 열지 고르는 줄. 미결 건수가 붙어 있어 여기서 이미 판단이 된다 */
+.orgbar { display: flex; flex-wrap: wrap; gap: var(--s2); margin-bottom: var(--s4); }
+.orgbar__item {
+  display: flex; flex-direction: column; gap: 1px; text-align: left;
+  padding: var(--s2) var(--s3); border-radius: var(--r2);
+  border: 1px solid var(--border); background: var(--surface); color: var(--text-2);
+}
+.orgbar__item b { font-size: 12.5px; font-weight: 650; }
+.orgbar__item small { font-size: 11px; color: var(--text-4); }
+.orgbar__item:hover { border-color: var(--border-strong); }
+.orgbar__item[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+.orgbar__item[aria-current="true"] small { color: var(--accent); opacity: .75; }
+
+/* 스크롤 없이 한 화면에 끝나야 하는 것이 이 카드의 조건이다 */
+.onepage__stats {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s4); padding: var(--s5); border-bottom: 1px solid var(--border);
+}
+.onepage__grid {
+  display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0;
+}
+.oblock { padding: var(--s4) var(--s5); border-bottom: 1px solid var(--border); min-width: 0; }
+.oblock:nth-child(odd) { border-right: 1px solid var(--border); }
+.oblock__head { display: flex; align-items: baseline; gap: var(--s2); margin-bottom: var(--s2); }
+.oblock__head b { font-size: 12.5px; font-weight: 650; }
+.oblock__head small { font-size: 11px; color: var(--text-4); }
+
+.orow {
+  display: flex; align-items: baseline; gap: var(--s2);
+  padding: 3px 0; font-size: 12.5px; min-width: 0;
+}
+.orow__code { flex: none; font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.orow__text { flex: 1; min-width: 0; color: var(--text); word-break: keep-all; }
+.orow__meta { flex: none; font-size: 11.5px; color: var(--text-3); }
+.orow.is-over .orow__meta { color: var(--danger); font-weight: 600; }
+
+.onepage__summary { padding: var(--s4) var(--s5); }
+.onepage__text { font-size: 13.5px; line-height: 1.8; word-break: keep-all; margin: var(--s2) 0 var(--s3); }
+
+@media (max-width: 900px) {
+  .onepage__stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .onepage__grid { grid-template-columns: minmax(0, 1fr); }
+  .oblock:nth-child(odd) { border-right: 0; }
+}
